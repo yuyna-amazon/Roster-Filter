@@ -1,20 +1,20 @@
 // ==UserScript==
 // @name         Roster Filter
-// @namespace    http://tampermonkey.net/
+// @namespace    https://github.com/yuyna-amazon/Roster-Filter
 // @version      2.2
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter
-// @updateURL    https://raw.githubusercontent.com/ユーザー名/リポジトリ名/main/script.user.js
-// @downloadURL  https://raw.githubusercontent.com/ユーザー名/リポジトリ名/main/script.user.js
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
+// @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
+// @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const STORAGE_KEY = 'rf-selected-filter';  // ← 追加：保存用キー
+    const STORAGE_KEY = 'rf-selected-filter';
 
     const FILTERS = [
         { key: 'ALL', label: '全て表示', min: -1, max: -1 },
@@ -44,12 +44,10 @@
     `;
     document.head.appendChild(style);
 
-    // ← 追加：保存された値を取得
     function getSavedFilter() {
         return localStorage.getItem(STORAGE_KEY) || 'ALL';
     }
 
-    // ← 追加：フィルター値を保存
     function saveFilter(key) {
         localStorage.setItem(STORAGE_KEY, key);
     }
@@ -75,7 +73,7 @@
 
     function doFilter() {
         const selected = document.querySelector('#rf-panel input:checked');
-        const key = selected ? selected.value : getSavedFilter();  // ← 変更
+        const key = selected ? selected.value : getSavedFilter();
 
         if (!cachedRows) cachedRows = document.querySelectorAll('td[data-bind="text: startTime"]');
 
@@ -100,7 +98,7 @@
     function createPanel() {
         if (document.getElementById('rf-panel')) return;
 
-        const savedKey = getSavedFilter();  // ← 追加：保存値を取得
+        const savedKey = getSavedFilter();
 
         const panel = document.createElement('div');
         panel.id = 'rf-panel';
@@ -108,7 +106,6 @@
         let html = '<div id="rf-header"><span>Filter</span><button id="rf-toggle">-</button></div>';
         html += '<div id="rf-content">';
         FILTERS.forEach(f => {
-            // ← 変更：保存値と一致するものをチェック
             const checked = f.key === savedKey ? ' checked' : '';
             html += '<label><input type="radio" name="rf-filter" value="' + f.key + '"' + checked + '>' + f.label + '</label>';
         });
@@ -119,10 +116,9 @@
         panel.innerHTML = html;
         document.body.appendChild(panel);
 
-        // ← 変更：changeイベントで保存も実行
         panel.addEventListener('change', function(e) {
             if (e.target.name === 'rf-filter') {
-                saveFilter(e.target.value);  // ← 追加：選択を保存
+                saveFilter(e.target.value);
             }
             doFilter();
         });
