@@ -5,6 +5,8 @@
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter
+// @updateURL    https://raw.githubusercontent.com/ユーザー名/リポジトリ名/main/script.user.js
+// @downloadURL  https://raw.githubusercontent.com/ユーザー名/リポジトリ名/main/script.user.js
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
 // @grant        none
 // ==/UserScript==
