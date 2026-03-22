@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster Filter
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      2.2
+// @version      2.3
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter
@@ -25,6 +25,9 @@
         { key: 'SSD_3_B', label: 'SSD_3_B', min: 1020, max: 1200 },
         { key: 'SSD_4', label: 'SSD_4', min: 1200, max: Infinity }
     ];
+
+    // 除外する serviceTypeName のリスト（追加・変更が容易）
+    const EXCLUDED_TYPES = ['AmFlex Kei Van (ProDP)'];
 
     let cachedRows = null;
 
@@ -82,8 +85,18 @@
             const row = td.closest('tr');
             if (!row) return;
             total++;
+
+            const stTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
+            const isExcluded = stTd && EXCLUDED_TYPES.includes(stTd.textContent.trim());
+
             const cat = getCategory(parseTime(td.textContent));
-            if (key === 'ALL' || cat === key) {
+
+            if (key === 'ALL') {
+                row.classList.remove('rf-hide');
+                visible++;
+            } else if (isExcluded) {
+                row.classList.add('rf-hide');
+            } else if (cat === key) {
                 row.classList.remove('rf-hide');
                 visible++;
             } else {
