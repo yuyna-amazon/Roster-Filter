@@ -6,8 +6,8 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
-// @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
-// @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
+// @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-veiw.user.js
+// @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-veiw.user.js
 // @grant        GM_setClipboard
 // ==/UserScript==
 
