@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.0
+// @version      5.1
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker
@@ -268,32 +268,59 @@
 
             for (; index < end; index++) {
                 const row = rows[index];
+                const nameTd = row.querySelector('td[data-bind="text: DAName"]');
 
+                // 非表示行はスタイルをリセットしてスキップ
                 if (row.classList.contains('rf-hide')) {
                     row.style.backgroundColor = '';
+                    if (nameTd) {
+                        nameTd.style.color = '';
+                        nameTd.style.fontWeight = '';
+                    }
                     continue;
                 }
 
                 const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
                 const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
-                const nameTd = row.querySelector('td[data-bind="text: DAName"]');
 
                 const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
                 const endTime = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
                 const name = nameTd ? nameTd.textContent.trim() : '';
 
                 let newColor = '';
+                let isActive = false;
+                let isDuplicate = false;
 
                 if (!endTime || endTime >= now) {
-                    if (availability === '実行中') {
+                    // 実行中チェック
+                    isActive = (availability === '実行中');
+
+                    // 重複チェック（実行中かどうかに関係なく独立判定）
+                    isDuplicate = checkDuplicates && name && previousCycleNames.has(name);
+
+                    // 重複カウントは実行中でも加算
+                    if (isDuplicate) duplicateCount++;
+
+                    // 背景色の決定：実行中（黄色）を優先
+                    if (isActive) {
                         newColor = ACTIVE_COLOR;
-                    } else if (checkDuplicates && name && previousCycleNames.has(name)) {
+                    } else if (isDuplicate) {
                         newColor = DUPLICATE_COLOR;
-                        duplicateCount++;
                     }
                 }
 
                 row.style.backgroundColor = newColor;
+
+                // 実行中かつ重複の場合は名前セルを赤太字にする
+                if (nameTd) {
+                    if (isActive && isDuplicate) {
+                        nameTd.style.color = '#c00';
+                        nameTd.style.fontWeight = 'bold';
+                    } else {
+                        nameTd.style.color = '';
+                        nameTd.style.fontWeight = '';
+                    }
+                }
             }
 
             if (index < rows.length) {
@@ -400,7 +427,6 @@
             const cells = row.querySelectorAll('td');
             const cellText = cells[timeColumnIndex] ? cells[timeColumnIndex].textContent.trim() : '';
 
-            // 時刻形式のみカウント（空白や無効な形式はスキップ）
             if (!cellText || !cellText.includes(':')) continue;
 
             const duration = durationColumnIndex !== -1 && cells[durationColumnIndex]
@@ -503,6 +529,7 @@
                 <div id="rf-legend">
                     <div class="rf-legend-item"><div class="rf-legend-color" style="background:${ACTIVE_COLOR}"></div>実行中</div>
                     <div class="rf-legend-item"><div class="rf-legend-color" style="background:${DUPLICATE_COLOR}"></div>前Cycle重複</div>
+                    <div class="rf-legend-item"><div class="rf-legend-color" style="background:${ACTIVE_COLOR};color:#c00;font-weight:bold;font-size:10px;text-align:center;line-height:14px;">名</div>実行中＋重複</div>
                 </div>
             </div>
         `;
