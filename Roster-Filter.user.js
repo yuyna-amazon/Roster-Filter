@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      4.0
+// @version      5.0
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
-// @description  Simple roster filter + availability highlighter + copy table data + block counter
+// @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
 // @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
@@ -17,6 +17,14 @@
     /* ======================================================
        共通ユーティリティ
     ====================================================== */
+
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
 
     function parseTimeToMinutes(str) {
         if (!str) return null;
@@ -39,10 +47,11 @@
     }
 
     /* ======================================================
-       Filter — 定数・状態
+       定数
     ====================================================== */
 
     const STORAGE_KEY = 'rf-selected-filter';
+    const BATCH_SIZE = 50;
 
     const FILTERS = [
         { key: 'ALL',    label: '全て表示', min: -1,   max: -1 },
@@ -54,15 +63,21 @@
         { key: 'SSD_4',  label: 'SSD_4',    min: 1200, max: Infinity }
     ];
 
-    const EXCLUDED_TYPES = ['AmFlex Kei Van (ProDP)'];
+    const FILTER_INDEX = {};
+    FILTERS.forEach((f, i) => { FILTER_INDEX[f.key] = i; });
 
-    let cachedRows = null;
+    const EXCLUDED_TYPES = ['AmFlex Kei Van (ProDP)'];
+    const ACTIVE_COLOR = '#ffffcc';
+    const DUPLICATE_COLOR = '#ffcccc';
 
     /* ======================================================
-       Highlighter — 定数
+       状態管理
     ====================================================== */
 
-    const ACTIVE_COLOR = '#ffffcc';
+    const cycleNamesCache = {};
+    let previousCycleNames = new Set();
+    let previousCycleKey = null;
+    let isProcessing = false;
 
     /* ======================================================
        CSS
@@ -82,6 +97,7 @@
         #rf-panel label{display:block;margin:4px 0;cursor:pointer}
         #rf-panel input{margin-right:6px}
         #rf-count{margin-top:8px;padding:6px;background:#f5f5f5;border-radius:3px}
+        #rf-dup-count{margin-top:4px;padding:6px;background:#ffeeee;border-radius:3px;color:#c00;font-size:11px}
         #rf-btn-group{display:flex;flex-direction:column;gap:4px;margin-top:8px}
         .rf-btn{padding:4px 8px;cursor:pointer;border-radius:3px;font-size:11px;width:100%;
                 border:1px solid #232f3e;background:#fff;color:#232f3e}
@@ -93,8 +109,6 @@
                          background-color:#4CAF50;color:white;border-radius:5px;
                          z-index:10001;font:12px Arial,sans-serif;
                          box-shadow:0 2px 8px rgba(0,0,0,0.2)}
-
-        /* Block Counter Box */
         #rf-block-box{position:fixed;bottom:20px;right:20px;padding:15px 20px;
                       background:#ffffff;color:#333;border:2px solid #2196F3;border-radius:8px;
                       box-shadow:0 2px 10px rgba(0,0,0,0.1);z-index:9999;
@@ -106,6 +120,9 @@
         .rf-block-title{font-weight:bold;margin-bottom:8px;color:#2196F3}
         .rf-block-item{display:grid;grid-template-columns:100px 60px 1fr;gap:10px;
                        margin:3px 0;padding:8px;background:#f5f5f5;border-radius:3px;align-items:center}
+        #rf-legend{margin-top:8px;padding:6px;background:#fafafa;border-radius:3px;font-size:10px}
+        .rf-legend-item{display:flex;align-items:center;margin:2px 0}
+        .rf-legend-color{width:14px;height:14px;border-radius:2px;margin-right:6px;border:1px solid #ccc}
     `;
     document.head.appendChild(style);
 
@@ -130,64 +147,183 @@
         return null;
     }
 
+    function getTable() {
+        return document.getElementById('cspDATable');
+    }
+
+    function getRows() {
+        const table = getTable();
+        return table ? table.querySelectorAll('tbody tr') : [];
+    }
+
+    function getPreviousCycleKey(currentKey) {
+        const currentIndex = FILTER_INDEX[currentKey];
+        if (currentIndex <= 1) return null;
+        return FILTERS[currentIndex - 1].key;
+    }
+
     function doFilter() {
         const selected = document.querySelector('#rf-panel input:checked');
         const key = selected ? selected.value : getSavedFilter();
-
-        if (!cachedRows) cachedRows = document.querySelectorAll('td[data-bind="text: startTime"]');
+        const rows = getRows();
 
         let total = 0, visible = 0;
-        cachedRows.forEach(td => {
-            const row = td.closest('tr');
-            if (!row) return;
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const startTimeTd = row.querySelector('td[data-bind="text: startTime"]');
+            if (!startTimeTd) continue;
+
             total++;
 
-            const stTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
-            const isExcluded = stTd && EXCLUDED_TYPES.includes(stTd.textContent.trim());
+            const serviceTypeTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
+            const isExcluded = serviceTypeTd && EXCLUDED_TYPES.includes(serviceTypeTd.textContent.trim());
+            const cat = getCategory(parseTimeToMinutes(startTimeTd.textContent));
 
-            const cat = getCategory(parseTimeToMinutes(td.textContent));
+            let shouldShow = key === 'ALL' || (!isExcluded && cat === key);
 
-            if (key === 'ALL') {
-                row.classList.remove('rf-hide');
-                visible++;
-            } else if (isExcluded) {
-                row.classList.add('rf-hide');
-            } else if (cat === key) {
+            if (shouldShow) {
                 row.classList.remove('rf-hide');
                 visible++;
             } else {
                 row.classList.add('rf-hide');
             }
-        });
+        }
 
         const cnt = document.getElementById('rf-count');
         if (cnt) cnt.textContent = '表示: ' + visible + ' / ' + total;
     }
 
     /* ======================================================
-       Highlighter — ロジック
+       サイクルの名前キャッシュ管理
+    ====================================================== */
+
+    function cacheNamesForFilter(filterKey) {
+        if (filterKey === 'ALL') return;
+
+        const rows = getRows();
+        const names = new Set();
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const startTimeTd = row.querySelector('td[data-bind="text: startTime"]');
+            if (!startTimeTd) continue;
+
+            const serviceTypeTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
+            const isExcluded = serviceTypeTd && EXCLUDED_TYPES.includes(serviceTypeTd.textContent.trim());
+            if (isExcluded) continue;
+
+            const cat = getCategory(parseTimeToMinutes(startTimeTd.textContent));
+            if (cat !== filterKey) continue;
+
+            const nameTd = row.querySelector('td[data-bind="text: DAName"]');
+            if (nameTd) {
+                const name = nameTd.textContent.trim();
+                if (name) names.add(name);
+            }
+        }
+
+        cycleNamesCache[filterKey] = names;
+    }
+
+    function cacheAllCycleNames() {
+        for (const f of FILTERS) {
+            if (f.key !== 'ALL') {
+                cacheNamesForFilter(f.key);
+            }
+        }
+    }
+
+    function setPreviousCycleNames(currentKey) {
+        const prevKey = getPreviousCycleKey(currentKey);
+        previousCycleKey = prevKey;
+
+        if (!prevKey || !cycleNamesCache[prevKey]) {
+            previousCycleNames = new Set();
+            return;
+        }
+
+        previousCycleNames = cycleNamesCache[prevKey];
+    }
+
+    /* ======================================================
+       Highlighter — バッチ処理版
     ====================================================== */
 
     function highlightRows() {
-        const rows = document.querySelectorAll('tr[data-bind="visible: isVisible"]');
+        if (isProcessing) return;
+        isProcessing = true;
+
+        const rows = Array.from(getRows());
         const now = new Date();
+        const selectedFilter = document.querySelector('#rf-panel input:checked');
+        const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
+        const checkDuplicates = currentKey !== 'ALL' && previousCycleNames.size > 0;
 
-        rows.forEach(tr => {
-            const availabilityTd = tr.querySelector('td[data-bind="text: availability"]');
-            const endTimeTd      = tr.querySelector('td[data-bind="text: endTime"]');
-            if (!availabilityTd) return;
+        let duplicateCount = 0;
+        let index = 0;
 
-            const availability = availabilityTd.textContent.trim();
-            const endTime      = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
+        function processBatch() {
+            const end = Math.min(index + BATCH_SIZE, rows.length);
 
-            tr.style.backgroundColor = '';
+            for (; index < end; index++) {
+                const row = rows[index];
 
-            if (endTime && endTime < now) return;
+                if (row.classList.contains('rf-hide')) {
+                    row.style.backgroundColor = '';
+                    continue;
+                }
 
-            if (availability === '実行中') {
-                tr.style.backgroundColor = ACTIVE_COLOR;
+                const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
+                const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
+                const nameTd = row.querySelector('td[data-bind="text: DAName"]');
+
+                const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
+                const endTime = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
+                const name = nameTd ? nameTd.textContent.trim() : '';
+
+                let newColor = '';
+
+                if (!endTime || endTime >= now) {
+                    if (availability === '実行中') {
+                        newColor = ACTIVE_COLOR;
+                    } else if (checkDuplicates && name && previousCycleNames.has(name)) {
+                        newColor = DUPLICATE_COLOR;
+                        duplicateCount++;
+                    }
+                }
+
+                row.style.backgroundColor = newColor;
             }
-        });
+
+            if (index < rows.length) {
+                setTimeout(processBatch, 0);
+            } else {
+                updateDuplicateCount(duplicateCount, currentKey);
+                isProcessing = false;
+            }
+        }
+
+        processBatch();
+    }
+
+    function updateDuplicateCount(count, currentKey) {
+        let dupDiv = document.getElementById('rf-dup-count');
+
+        if (currentKey === 'ALL' || !previousCycleKey) {
+            if (dupDiv) dupDiv.style.display = 'none';
+            return;
+        }
+
+        if (!dupDiv) {
+            dupDiv = document.createElement('div');
+            dupDiv.id = 'rf-dup-count';
+            const countDiv = document.getElementById('rf-count');
+            if (countDiv) countDiv.after(dupDiv);
+        }
+
+        dupDiv.style.display = 'block';
+        dupDiv.innerHTML = `${previousCycleKey}から重複: <strong>${count}名</strong>`;
     }
 
     /* ======================================================
@@ -199,40 +335,32 @@
         notification.className = 'rf-notification';
         notification.textContent = message;
         document.body.appendChild(notification);
-
-        setTimeout(() => {
-            notification.remove();
-        }, 3000);
+        setTimeout(() => notification.remove(), 3000);
     }
 
     function copyTableData() {
-        const table = document.getElementById('cspDATable');
+        const table = getTable();
         if (!table) {
             alert('Table not found!');
             return;
         }
 
-        let data = [];
-
         const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
-        data.push(headers.join('\t'));
+        const data = [headers.join('\t')];
 
-        const rows = table.querySelectorAll('tbody tr');
         let copiedCount = 0;
-        rows.forEach(row => {
-            if (row.classList.contains('rf-hide')) return;
-
+        const rows = table.querySelectorAll('tbody tr');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.classList.contains('rf-hide')) continue;
             const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim());
             if (cells.length > 0) {
                 data.push(cells.join('\t'));
                 copiedCount++;
             }
-        });
+        }
 
-        const textData = data.join('\n');
-
-        GM_setClipboard(textData);
-
+        GM_setClipboard(data.join('\n'));
         showNotification(copiedCount + '行をコピーしました');
     }
 
@@ -241,7 +369,7 @@
     ====================================================== */
 
     function calculateBlocks() {
-        const table = document.getElementById('cspDATable');
+        const table = getTable();
         if (!table) {
             showBlockError('テーブルが見つかりません');
             return;
@@ -251,106 +379,83 @@
         let timeColumnIndex = -1;
         let durationColumnIndex = -1;
 
-        headers.forEach((th, index) => {
-            const headerText = th.textContent.trim();
-            if (headerText === '開始時刻' || headerText.includes('開始時刻')) {
-                timeColumnIndex = index;
-            }
-            if (headerText === 'シフトの長さ' || headerText.includes('シフトの長さ')) {
-                durationColumnIndex = index;
-            }
-        });
+        for (let i = 0; i < headers.length; i++) {
+            const headerText = headers[i].textContent.trim();
+            if (headerText.includes('開始時刻')) timeColumnIndex = i;
+            if (headerText.includes('シフトの長さ')) durationColumnIndex = i;
+        }
 
         if (timeColumnIndex === -1) {
             showBlockError('「開始時刻」列が見つかりません');
             return;
         }
 
-        const rows = table.querySelectorAll('tbody tr');
-        let timeFormatData = {};
-        let emptyCount = 0;
+        const timeFormatData = {};
 
-        rows.forEach((row) => {
-            if (row.classList.contains('rf-hide')) return;
+        const rows = table.querySelectorAll('tbody tr');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.classList.contains('rf-hide')) continue;
 
             const cells = row.querySelectorAll('td');
-            if (cells[timeColumnIndex]) {
-                const cellText = cells[timeColumnIndex].textContent.trim();
+            const cellText = cells[timeColumnIndex] ? cells[timeColumnIndex].textContent.trim() : '';
 
-                if (!cellText || cellText === '') {
-                    emptyCount++;
-                    return;
+            // 時刻形式のみカウント（空白や無効な形式はスキップ）
+            if (!cellText || !cellText.includes(':')) continue;
+
+            const duration = durationColumnIndex !== -1 && cells[durationColumnIndex]
+                ? cells[durationColumnIndex].textContent.trim()
+                : '';
+
+            if (timeFormatData[cellText]) {
+                timeFormatData[cellText].count++;
+                if (duration && !timeFormatData[cellText].durations.includes(duration)) {
+                    timeFormatData[cellText].durations.push(duration);
                 }
-
-                if (cellText.includes(':')) {
-                    let duration = '';
-                    if (durationColumnIndex !== -1 && cells[durationColumnIndex]) {
-                        duration = cells[durationColumnIndex].textContent.trim();
-                    }
-
-                    if (timeFormatData[cellText]) {
-                        timeFormatData[cellText].count++;
-                        if (duration && !timeFormatData[cellText].durations.includes(duration)) {
-                            timeFormatData[cellText].durations.push(duration);
-                        }
-                    } else {
-                        timeFormatData[cellText] = {
-                            count: 1,
-                            durations: duration ? [duration] : []
-                        };
-                    }
-                }
+            } else {
+                timeFormatData[cellText] = {
+                    count: 1,
+                    durations: duration ? [duration] : []
+                };
             }
-        });
+        }
 
-        showBlockResult(timeFormatData, emptyCount, durationColumnIndex !== -1);
+        showBlockResult(timeFormatData, durationColumnIndex !== -1);
     }
 
     function showBlockError(message) {
         removeBlockBox();
-
         const box = document.createElement('div');
         box.id = 'rf-block-box';
         box.className = 'error';
-
         box.innerHTML = `
             <div style="font-weight: bold; color: #f44336;">エラー</div>
             <div style="margin-top: 5px;">${message}</div>
         `;
-
         document.body.appendChild(box);
     }
 
-    function showBlockResult(timeFormatData, emptyCount, hasDurationColumn) {
+    function showBlockResult(timeFormatData, hasDurationColumn) {
         removeBlockBox();
 
         const box = document.createElement('div');
         box.id = 'rf-block-box';
 
-        let timeFormatsHtml = '';
         const timeFormats = Object.entries(timeFormatData);
+        timeFormats.sort((a, b) => (parseTimeToMinutes(a[0]) || 0) - (parseTimeToMinutes(b[0]) || 0));
 
-        if (timeFormats.length > 0) {
-            timeFormats.sort((a, b) => (parseTimeToMinutes(a[0]) || 0) - (parseTimeToMinutes(b[0]) || 0));
-
-            timeFormatsHtml = timeFormats.map(([time, data]) => {
-                const durationsText = data.durations.length > 0
-                    ? data.durations.join(', ')
-                    : '-';
-
-                return `<div class="rf-block-item">
+        const timeFormatsHtml = timeFormats.length > 0
+            ? timeFormats.map(([time, data]) => `
+                <div class="rf-block-item">
                     <span style="font-weight: bold;">${time}</span>
                     <span style="color: #f44336; font-weight: bold;">${data.count}名</span>
-                    <span style="color: #666;">${durationsText}</span>
-                </div>`;
-            }).join('');
-        }
+                    <span style="color: #666;">${data.durations.join(', ') || '-'}</span>
+                </div>`).join('')
+            : '<div style="color:#999">データがありません</div>';
 
         const totalTimeCount = Object.values(timeFormatData).reduce((sum, data) => sum + data.count, 0);
-
         const selectedFilter = document.querySelector('#rf-panel input:checked');
-        const filterName = selectedFilter ? selectedFilter.value : 'ALL';
-        const filterLabel = filterName === 'ALL' ? '全て' : filterName;
+        const filterLabel = selectedFilter?.value === 'ALL' ? '全て' : (selectedFilter?.value || 'ALL');
 
         box.innerHTML = `
             <div class="rf-block-header">
@@ -359,19 +464,10 @@
                     <span>DP合計:</span>
                     <strong style="color: #f57c00;">${totalTimeCount}名</strong>
                 </div>
-                ${emptyCount > 0 ? `
-                <div class="rf-block-row">
-                    <span>空白:</span>
-                    <strong style="color: #757575;">${emptyCount}名</strong>
-                </div>` : ''}
-                ${!hasDurationColumn ? `
-                <div style="margin-top: 5px; font-size: 12px; color: #ff9800;">
-                    シフトの長さ列が見つかりません
-                </div>` : ''}
+                ${!hasDurationColumn ? `<div style="margin-top: 5px; font-size: 12px; color: #ff9800;">シフトの長さ列が見つかりません</div>` : ''}
             </div>
-
             <div class="rf-block-title">Blockの内訳</div>
-            ${timeFormatsHtml || '<div style="color:#999">データがありません</div>'}
+            ${timeFormatsHtml}
         `;
 
         document.body.appendChild(box);
@@ -393,51 +489,53 @@
         const panel = document.createElement('div');
         panel.id = 'rf-panel';
 
-        let html = '<div id="rf-header"><span>Filter</span><button id="rf-toggle">-</button></div>';
-        html += '<div id="rf-content">';
-        FILTERS.forEach(f => {
-            const checked = f.key === savedKey ? ' checked' : '';
-            html += '<label><input type="radio" name="rf-filter" value="' +
-                     f.key + '"' + checked + '>' + f.label + '</label>';
-        });
-        html += '<div id="rf-btn-group">';
-        html += '<button id="rf-refresh" class="rf-btn">更新</button>';
-        html += '<button id="rf-copy" class="rf-btn rf-btn-green">Copy</button>';
-        html += '</div>';
-        html += '<div id="rf-count">-</div>';
-        html += '</div>';
+        panel.innerHTML = `
+            <div id="rf-header"><span>Filter</span><button id="rf-toggle">-</button></div>
+            <div id="rf-content">
+                ${FILTERS.map(f => `
+                    <label><input type="radio" name="rf-filter" value="${f.key}"${f.key === savedKey ? ' checked' : ''}>${f.label}</label>
+                `).join('')}
+                <div id="rf-btn-group">
+                    <button id="rf-refresh" class="rf-btn">更新</button>
+                    <button id="rf-copy" class="rf-btn rf-btn-green">Copy</button>
+                </div>
+                <div id="rf-count">-</div>
+                <div id="rf-legend">
+                    <div class="rf-legend-item"><div class="rf-legend-color" style="background:${ACTIVE_COLOR}"></div>実行中</div>
+                    <div class="rf-legend-item"><div class="rf-legend-color" style="background:${DUPLICATE_COLOR}"></div>前Cycle重複</div>
+                </div>
+            </div>
+        `;
 
-        panel.innerHTML = html;
         document.body.appendChild(panel);
 
-        // フィルター変更
         panel.addEventListener('change', function(e) {
-            if (e.target.name === 'rf-filter') saveFilter(e.target.value);
-            doFilter();
-            calculateBlocks();
+            if (e.target.name === 'rf-filter') {
+                const newKey = e.target.value;
+                saveFilter(newKey);
+                setPreviousCycleNames(newKey);
+                doFilter();
+                highlightRows();
+                calculateBlocks();
+            }
         });
 
-        // パネル折りたたみ
         document.getElementById('rf-toggle').onclick = function() {
             const content = document.getElementById('rf-content');
-            if (content.classList.contains('hide')) {
-                content.classList.remove('hide');
-                this.textContent = '-';
-            } else {
-                content.classList.add('hide');
-                this.textContent = '+';
-            }
+            const isHidden = content.classList.toggle('hide');
+            this.textContent = isHidden ? '+' : '-';
         };
 
-        // 更新ボタン（Filter + Highlighter + Block計算）
         document.getElementById('rf-refresh').onclick = function() {
-            cachedRows = null;
+            cacheAllCycleNames();
+            const selected = document.querySelector('#rf-panel input:checked');
+            const currentKey = selected ? selected.value : 'ALL';
+            setPreviousCycleNames(currentKey);
             doFilter();
             highlightRows();
             calculateBlocks();
         };
 
-        // コピーボタン
         document.getElementById('rf-copy').onclick = copyTableData;
     }
 
@@ -445,22 +543,25 @@
        初期化
     ====================================================== */
 
-    setTimeout(function() {
+    function init() {
         createPanel();
+        cacheAllCycleNames();
+        const savedKey = getSavedFilter();
+        setPreviousCycleNames(savedKey);
         doFilter();
         highlightRows();
         calculateBlocks();
-    }, 3000);
-
-    const observer = new MutationObserver(highlightRows);
-    if (document.body) {
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
     }
 
-    setInterval(highlightRows, 60000);
+    function waitForTable() {
+        const table = getTable();
+        if (table && table.querySelector('tbody tr')) {
+            init();
+        } else {
+            setTimeout(waitForTable, 1000);
+        }
+    }
+
+    setTimeout(waitForTable, 2000);
 
 })();
