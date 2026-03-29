@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.1
+// @version      5.2
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker
@@ -75,8 +75,8 @@
     ====================================================== */
 
     const cycleNamesCache = {};
-    let previousCycleNames = new Set();
-    let previousCycleKey = null;
+    let nextCycleNames = new Set();      // ← 変更
+    let nextCycleKey = null;             // ← 変更
     let isProcessing = false;
 
     /* ======================================================
@@ -156,10 +156,11 @@
         return table ? table.querySelectorAll('tbody tr') : [];
     }
 
-    function getPreviousCycleKey(currentKey) {
+    // ★ 変更: 次のCycleキーを返す
+    function getNextCycleKey(currentKey) {
         const currentIndex = FILTER_INDEX[currentKey];
-        if (currentIndex <= 1) return null;
-        return FILTERS[currentIndex - 1].key;
+        if (currentIndex === undefined || currentIndex >= FILTERS.length - 1) return null;
+        return FILTERS[currentIndex + 1].key;
     }
 
     function doFilter() {
@@ -234,16 +235,17 @@
         }
     }
 
-    function setPreviousCycleNames(currentKey) {
-        const prevKey = getPreviousCycleKey(currentKey);
-        previousCycleKey = prevKey;
+    // ★ 変更: 次のCycleの名前をセット
+    function setNextCycleNames(currentKey) {
+        const nKey = getNextCycleKey(currentKey);
+        nextCycleKey = nKey;
 
-        if (!prevKey || !cycleNamesCache[prevKey]) {
-            previousCycleNames = new Set();
+        if (!nKey || !cycleNamesCache[nKey]) {
+            nextCycleNames = new Set();
             return;
         }
 
-        previousCycleNames = cycleNamesCache[prevKey];
+        nextCycleNames = cycleNamesCache[nKey];
     }
 
     /* ======================================================
@@ -258,7 +260,8 @@
         const now = new Date();
         const selectedFilter = document.querySelector('#rf-panel input:checked');
         const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
-        const checkDuplicates = currentKey !== 'ALL' && previousCycleNames.size > 0;
+        // ★ 変更: nextCycleNames を使用
+        const checkDuplicates = currentKey !== 'ALL' && nextCycleNames.size > 0;
 
         let duplicateCount = 0;
         let index = 0;
@@ -270,7 +273,6 @@
                 const row = rows[index];
                 const nameTd = row.querySelector('td[data-bind="text: DAName"]');
 
-                // 非表示行はスタイルをリセットしてスキップ
                 if (row.classList.contains('rf-hide')) {
                     row.style.backgroundColor = '';
                     if (nameTd) {
@@ -292,16 +294,13 @@
                 let isDuplicate = false;
 
                 if (!endTime || endTime >= now) {
-                    // 実行中チェック
                     isActive = (availability === '実行中');
 
-                    // 重複チェック（実行中かどうかに関係なく独立判定）
-                    isDuplicate = checkDuplicates && name && previousCycleNames.has(name);
+                    // ★ 変更: nextCycleNames で重複チェック
+                    isDuplicate = checkDuplicates && name && nextCycleNames.has(name);
 
-                    // 重複カウントは実行中でも加算
                     if (isDuplicate) duplicateCount++;
 
-                    // 背景色の決定：実行中（黄色）を優先
                     if (isActive) {
                         newColor = ACTIVE_COLOR;
                     } else if (isDuplicate) {
@@ -311,7 +310,6 @@
 
                 row.style.backgroundColor = newColor;
 
-                // 実行中かつ重複の場合は名前セルを赤太字にする
                 if (nameTd) {
                     if (isActive && isDuplicate) {
                         nameTd.style.color = '#c00';
@@ -337,7 +335,8 @@
     function updateDuplicateCount(count, currentKey) {
         let dupDiv = document.getElementById('rf-dup-count');
 
-        if (currentKey === 'ALL' || !previousCycleKey) {
+        // ★ 変更: nextCycleKey を使用
+        if (currentKey === 'ALL' || !nextCycleKey) {
             if (dupDiv) dupDiv.style.display = 'none';
             return;
         }
@@ -350,7 +349,8 @@
         }
 
         dupDiv.style.display = 'block';
-        dupDiv.innerHTML = `${previousCycleKey}から重複: <strong>${count}名</strong>`;
+        // ★ 変更: 表示テキストを「次Cycle」に
+        dupDiv.innerHTML = `${nextCycleKey}と重複: <strong>${count}名</strong>`;
     }
 
     /* ======================================================
@@ -528,7 +528,7 @@
                 <div id="rf-count">-</div>
                 <div id="rf-legend">
                     <div class="rf-legend-item"><div class="rf-legend-color" style="background:${ACTIVE_COLOR}"></div>実行中</div>
-                    <div class="rf-legend-item"><div class="rf-legend-color" style="background:${DUPLICATE_COLOR}"></div>前Cycle重複</div>
+                    <div class="rf-legend-item"><div class="rf-legend-color" style="background:${DUPLICATE_COLOR}"></div>次Cycle重複</div>
                     <div class="rf-legend-item"><div class="rf-legend-color" style="background:${ACTIVE_COLOR};color:#c00;font-weight:bold;font-size:10px;text-align:center;line-height:14px;">名</div>実行中＋重複</div>
                 </div>
             </div>
@@ -540,7 +540,8 @@
             if (e.target.name === 'rf-filter') {
                 const newKey = e.target.value;
                 saveFilter(newKey);
-                setPreviousCycleNames(newKey);
+                // ★ 変更
+                setNextCycleNames(newKey);
                 doFilter();
                 highlightRows();
                 calculateBlocks();
@@ -557,7 +558,8 @@
             cacheAllCycleNames();
             const selected = document.querySelector('#rf-panel input:checked');
             const currentKey = selected ? selected.value : 'ALL';
-            setPreviousCycleNames(currentKey);
+            // ★ 変更
+            setNextCycleNames(currentKey);
             doFilter();
             highlightRows();
             calculateBlocks();
@@ -574,7 +576,8 @@
         createPanel();
         cacheAllCycleNames();
         const savedKey = getSavedFilter();
-        setPreviousCycleNames(savedKey);
+        // ★ 変更
+        setNextCycleNames(savedKey);
         doFilter();
         highlightRows();
         calculateBlocks();
