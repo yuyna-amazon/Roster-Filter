@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.7
+// @version      6.0
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -20,17 +20,27 @@
 
     function parseTimeToMinutes(str) {
         if (!str) return null;
-        const m = str.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
-        if (!m) return null;
+        const text = str.trim();
 
-        let h = parseInt(m[1], 10);
-        const min = parseInt(m[2], 10);
-        const p = m[3].toLowerCase();
+        let m = text.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+        if (m) {
+            let h = parseInt(m[1], 10);
+            const min = parseInt(m[2], 10);
+            const p = m[3].toLowerCase();
 
-        if (p === 'am' && h === 12) h = 0;
-        if (p === 'pm' && h !== 12) h += 12;
+            if (p === 'am' && h === 12) h = 0;
+            if (p === 'pm' && h !== 12) h += 12;
+            return h * 60 + min;
+        }
 
-        return h * 60 + min;
+        m = text.match(/^(\d{1,2}):(\d{2})$/);
+        if (m) {
+            const h = parseInt(m[1], 10);
+            const min = parseInt(m[2], 10);
+            return h * 60 + min;
+        }
+
+        return null;
     }
 
     function parseTimeToDate(str) {
@@ -46,6 +56,16 @@
             mins % 60,
             0
         );
+    }
+
+    function minutesToDisplayTime(mins) {
+        if (mins === null || mins === undefined) return '-';
+        let h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const period = h >= 12 ? 'pm' : 'am';
+        let dispH = h % 12;
+        if (dispH === 0) dispH = 12;
+        return String(dispH) + ':' + (m < 10 ? '0' + m : String(m)) + ' ' + period;
     }
 
     function escapeHtml(str) {
@@ -169,7 +189,15 @@
             padding: 6px;
             background: #f5f5f5;
             border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-sizing: border-box;
+            width: 100%;
+            font-size: 12px;
         }
+        #rf-count .rf-count-label { text-align: left; }
+        #rf-count .rf-count-val { text-align: right; }
         #rf-dup-count {
             margin-top: 4px;
             padding: 6px;
@@ -177,8 +205,16 @@
             border-radius: 3px;
             color: #c00;
             font-size: 11px;
-            line-height: 1.5;
+            line-height: 1.2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            box-sizing: border-box;
+            width: 100%;
         }
+        #rf-dup-count .rf-dup-key { text-align: left; }
+        #rf-dup-count .rf-dup-val { text-align: right; }
 
         #rf-btn-group {
             display: flex;
@@ -272,15 +308,127 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
+        .rf-start-base {
+            display: inline-block;
+            position: relative;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        .rf-start-base .rf-start-base-text {
+            display: inline-block;
+        }
         .rf-next-cycle-note {
-            display: block;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 100%;
             margin-top: 2px;
             font-size: 10px;
-            line-height: 1.2;
+            line-height: 1.1;
+            color: #c2185b;
+            font-weight: bold;
+            white-space: normal;
+            background: rgba(255,255,255,0.95);
+            padding: 2px 6px;
+            border-radius: 3px;
+            max-width: calc(100% - 8px);
+            box-sizing: border-box;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            text-align: center;
+            z-index: 3;
+            pointer-events: none;
+            display: block;
+        }
+        /* インラインで右側に表示する注釈 (横並び) */
+        .rf-end-inline {
+            /* 表示フローに影響を与えないインラインラッパー
+               注釈はセルに対して絶対配置するのでここでは位置を変えない */
+            position: static;
+            display: inline;
+            vertical-align: middle;
+        }
+        .rf-end-text {
+            display: inline-block;
+            /* 基本の時刻表示は他の行と揃えるため余白を与えない（位置は変えない） */
+            padding-right: 0;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+        .rf-next-cycle-inline {
+            position: absolute;
+            /* ベース文字列の右側に収める（セル内で被らないように少し余裕を持たせる） */
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            line-height: 1;
             color: #c2185b;
             font-weight: bold;
             white-space: nowrap;
+            background: transparent;
+            padding: 0 2px;
+            pointer-events: none;
+            z-index: 5;
+            max-width: 40px;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
+        .rf-next-cycle-inline .rf-next-time {
+            display: block;
+            font-size: 11px;
+            line-height: 1;
+            width: 40px;
+            max-width: 40px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: center;
+        }
+        .rf-next-cycle-inline .rf-next-period {
+            display: block;
+            font-size: 10px;
+            line-height: 1;
+            color: #c2185b;
+            opacity: 0.95;
+        }
+        /* 別列として挿入するセルのスタイル */
+        td.rf-next-cell {
+            width: 48px;
+            max-width: 48px;
+            padding: 2px 4px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 11px;
+            color: #c2185b;
+            font-weight: bold;
+            background: transparent;
+        }
+        td.rf-next-cell .rf-next-time { font-size: 12px; }
+        td.rf-next-cell .rf-next-period { font-size: 11px; color: #c2185b; opacity: 0.95; }
+        /* 行間を広げないため、インナーは詰めて表示 */
+        .rf-next-cell-inner {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            line-height: 1;
+            margin: 0;
+            padding: 0;
+        }
+        td.rf-next-cell .rf-next-time,
+        td.rf-next-cell .rf-next-period {
+            display: block;
+            margin: 0;
+            padding: 0;
+            line-height: 1;
+        }
+        th.rf-next-header { width: 48px; max-width: 48px; }
     `;
     document.head.appendChild(style);
 
@@ -317,6 +465,57 @@
         return t ? t.querySelectorAll('tbody tr') : [];
     }
 
+    function getNameCell(row) {
+        let td = row.querySelector('td[data-bind="text: DAName"]');
+        if (td) return td;
+
+        const candidates = row.querySelectorAll('td[data-bind]');
+        for (const candidate of candidates) {
+            const bind = (candidate.getAttribute('data-bind') || '').toLowerCase();
+            if (bind.includes('text:') && bind.includes('name')) {
+                if (!bind.includes('servicetypename') && !bind.includes('availability')) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    function getStartTimeCell(row) {
+        let td = row.querySelector('td[data-bind="text: startTime"]');
+        if (td) return td;
+
+        const candidates = row.querySelectorAll('td[data-bind]');
+        for (const candidate of candidates) {
+            const bind = (candidate.getAttribute('data-bind') || '').toLowerCase();
+            if (bind.includes('text:') && bind.includes('start')) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    function getEndTimeCell(row) {
+        let td = row.querySelector('td[data-bind="text: endTime"]');
+        if (td) return td;
+
+        const candidates = row.querySelectorAll('td[data-bind]');
+        for (const candidate of candidates) {
+            const bind = (candidate.getAttribute('data-bind') || '').toLowerCase();
+            if (bind.includes('text:') && bind.includes('end')) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    function normalizeName(name) {
+        return String(name || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLowerCase();
+    }
+
     function getNextCycleKey(currentKey) {
         const idx = FILTER_INDEX[currentKey];
         if (idx === undefined || idx >= FILTERS.length - 1) return null;
@@ -333,7 +532,7 @@
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            const startTimeTd = row.querySelector('td[data-bind="text: startTime"]');
+            const startTimeTd = getStartTimeCell(row);
             if (!startTimeTd) continue;
 
             total++;
@@ -352,7 +551,8 @@
         }
 
         const cnt = document.getElementById('rf-count');
-        if (cnt) cnt.textContent = '表示: ' + visible + ' / ' + total;
+        if (cnt) cnt.innerHTML = '<span class="rf-count-label">表示</span>'
+            + '<span class="rf-count-val">' + visible + ' / ' + total + '</span>';
     }
 
     /* ======================================================
@@ -368,36 +568,39 @@
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            const startTimeTd = row.querySelector('td[data-bind="text: startTime"]');
+            const startTimeTd = getStartTimeCell(row);
             if (!startTimeTd) continue;
 
             const serviceTypeTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
             if (serviceTypeTd && EXCLUDED_TYPES.includes(serviceTypeTd.textContent.trim())) continue;
 
+            restoreCellHtml(startTimeTd);
+            const endTimeTd = getEndTimeCell(row);
+            restoreCellHtml(endTimeTd);
+
             const startText = startTimeTd.textContent.trim();
             const cat = getCategory(parseTimeToMinutes(startText));
             if (cat !== filterKey) continue;
 
-            const nameTd = row.querySelector('td[data-bind="text: DAName"]');
-            const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
+            const nameTd = getNameCell(row);
 
             const name = nameTd ? nameTd.textContent.trim() : '';
+            const normalizedName = normalizeName(name);
             const endText = endTimeTd ? endTimeTd.textContent.trim() : '';
 
-            if (!name) continue;
+            if (!normalizedName) continue;
 
-            names.add(name);
-
+            names.add(normalizedName);
             const startMins = parseTimeToMinutes(startText);
             const endMins = parseTimeToMinutes(endText);
 
-            if (!detailMap.has(name)) {
-                detailMap.set(name, {
+            if (!detailMap.has(normalizedName)) {
+                detailMap.set(normalizedName, {
                     start: startMins,
                     end: endMins
                 });
             } else {
-                const cur = detailMap.get(name);
+                const cur = detailMap.get(normalizedName);
                 if (startMins !== null && (cur.start === null || startMins < cur.start)) {
                     cur.start = startMins;
                 }
@@ -412,6 +615,7 @@
     }
 
     function cacheAllCycleNames() {
+        clearNextCycleInfoFromBody();
         FILTERS.forEach(f => {
             if (f.key !== 'ALL') cacheDetailsForFilter(f.key);
         });
@@ -420,7 +624,15 @@
     function setNextCycleNames(currentKey) {
         const nKey = getNextCycleKey(currentKey);
         nextCycleKey = nKey;
-        nextCycleNames = (nKey && cycleNamesCache[nKey]) ? cycleNamesCache[nKey] : new Set();
+        if (!nKey) {
+            nextCycleNames = new Set();
+            return;
+        }
+
+        if (!cycleNamesCache[nKey]) {
+            cacheDetailsForFilter(nKey);
+        }
+        nextCycleNames = cycleNamesCache[nKey] || new Set();
     }
 
     /* ======================================================
@@ -432,6 +644,10 @@
         if (td.dataset.rfOriginalHtml !== undefined) {
             td.innerHTML = td.dataset.rfOriginalHtml;
         }
+        if (td.dataset.rfOriginalPosition !== undefined) {
+            td.style.position = td.dataset.rfOriginalPosition || '';
+            delete td.dataset.rfOriginalPosition;
+        }
     }
 
     function rememberOriginalCellHtml(td) {
@@ -439,41 +655,58 @@
         if (td.dataset.rfOriginalHtml === undefined) {
             td.dataset.rfOriginalHtml = td.innerHTML;
         }
+        if (td.dataset.rfOriginalPosition === undefined) {
+            td.dataset.rfOriginalPosition = td.style.position || '';
+        }
     }
 
     function clearNextCycleInfoFromBody() {
         getRows().forEach(row => {
-            const startTd = row.querySelector('td[data-bind="text: startTime"]');
-            const endTd   = row.querySelector('td[data-bind="text: endTime"]');
+            const startTd = getStartTimeCell(row);
+            const endTd   = getEndTimeCell(row);
             restoreCellHtml(startTd);
             restoreCellHtml(endTd);
         });
+        // remove any previously inserted next-cycle cells/headers
+        const table = getTable();
+        if (table) {
+            Array.from(table.querySelectorAll('td.rf-next-cell')).forEach(td => td.remove());
+            Array.from(table.querySelectorAll('th.rf-next-header')).forEach(th => th.remove());
+            try { delete table.dataset.rfNextColIndex; } catch (e) {}
+        }
     }
 
+    // NOTE: 列挿入方式は列幅を崩すため廃止しました。
+    //       代わりに injectNextCycleInfoIntoBody() で endTd 内に
+    //       オーバーレイ表示します（レイアウトを崩しません）。
+
     function injectNextCycleInfoIntoBody(startTd, endTd, nextInfo) {
-        if (!startTd || !endTd || !nextInfo) return;
+        if (!endTd || !nextInfo) return;
 
-        rememberOriginalCellHtml(startTd);
+        // startTd は表示しない（開始セルには何も注入しない）
+        // 終了セルには右側に次Cycleの開始時刻をインラインで表示する
+        // 保存（後で復元するため）するが、注釈は innerHTML を置き換えず append する
         rememberOriginalCellHtml(endTd);
-
-        const startBase = escapeHtml(startTd.textContent.trim());
-        const endBase   = escapeHtml(endTd.textContent.trim());
+        try { endTd.style.position = 'relative'; } catch (e) { /* ignore */ }
 
         const nextStart = nextInfo.start !== null && nextInfo.start !== undefined
             ? minutesToDisplayTime(nextInfo.start)
             : '-';
 
-        const nextEnd = nextInfo.end !== null && nextInfo.end !== undefined
-            ? minutesToDisplayTime(nextInfo.end)
-            : '-';
+        const parts = String(nextStart).split(/\s+/);
+        const timePart = parts[0] || nextStart;
+        const periodPart = parts[1] || '';
 
-        startTd.innerHTML =
-            '<span>' + startBase + '</span>' +
-            '<span class="rf-next-cycle-note">→ 次: ' + escapeHtml(nextStart) + '</span>';
+        // 既存のセル内容はそのままに、絶対配置の注釈要素を追加する（列幅を変えない）
+        // まず既に挿入済みの注釈があれば削除
+        const existing = endTd.querySelector('.rf-next-cycle-inline');
+        if (existing) existing.remove();
 
-        endTd.innerHTML =
-            '<span>' + endBase + '</span>' +
-            '<span class="rf-next-cycle-note">→ 次: ' + escapeHtml(nextEnd) + '</span>';
+        const note = document.createElement('span');
+        note.className = 'rf-next-cycle-inline';
+        note.innerHTML = '<span class="rf-next-time">' + escapeHtml(timePart) + '</span>'
+            + (periodPart ? '<span class="rf-next-period">' + escapeHtml(periodPart) + '</span>' : '');
+        endTd.appendChild(note);
     }
 
     /* ======================================================
@@ -504,9 +737,9 @@
 
             for (; index < end; index++) {
                 const row = rows[index];
-                const nameTd = row.querySelector('td[data-bind="text: DAName"]');
-                const startTd = row.querySelector('td[data-bind="text: startTime"]');
-                const endTd   = row.querySelector('td[data-bind="text: endTime"]');
+                const nameTd = getNameCell(row);
+                const startTd = getStartTimeCell(row);
+                const endTd   = getEndTimeCell(row);
 
                 if (row.classList.contains('rf-hide')) {
                     row.style.backgroundColor = '';
@@ -524,14 +757,15 @@
                 const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
                 const endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
                 const name = nameTd ? nameTd.textContent.trim() : '';
+                const normalizedName = normalizeName(name);
 
                 let newColor = '';
                 let isActive = false;
                 let isDuplicate = false;
 
-                const nextInfo = name ? nextDetailMap.get(name) : null;
+                const nextInfo = normalizedName ? nextDetailMap.get(normalizedName) : null;
 
-                isDuplicate = checkDuplicates && !!name && nextCycleNames.has(name);
+                isDuplicate = checkDuplicates && !!normalizedName && nextCycleNames.has(normalizedName);
                 isActive = (!endTime || endTime >= now) && (availability === '実行中');
 
                 if (isDuplicate) duplicateCount++;
@@ -555,6 +789,7 @@
                 }
 
                 if (isDuplicate && nextInfo) {
+                    // endTd 内にオーバーレイ注釈を表示（列幅は変えない）
                     injectNextCycleInfoIntoBody(startTd, endTd, nextInfo);
                 } else {
                     restoreCellHtml(startTd);
@@ -588,11 +823,9 @@
             if (countDiv) countDiv.after(dupDiv);
         }
 
-        dupDiv.style.display = 'block';
-        dupDiv.innerHTML =
-            '<div><strong>' + nextCycleKey + '</strong></div>' +
-            '<div>重複: <strong>' + count + '名</strong></div>' +
-            '<div style="margin-top:4px;">ピンク行の開始/終了セル内に次Cycle時刻を表示</div>';
+        dupDiv.style.display = 'flex';
+        dupDiv.innerHTML = '<span class="rf-dup-key"><strong>' + nextCycleKey + '</strong></span>'
+            + '<span class="rf-dup-val">重複: <strong>' + count + '名</strong></span>';
     }
 
     /* ======================================================
@@ -605,6 +838,15 @@
         n.textContent = message;
         document.body.appendChild(n);
         setTimeout(() => n.remove(), 3000);
+    }
+
+    function getCellTextForCopy(td) {
+        if (!td) return '';
+        const note = td.querySelector('.rf-next-cycle-note, .rf-next-cycle-inline');
+        if (!note) return td.textContent.trim();
+        const full = td.textContent || '';
+        const noteText = note.textContent || '';
+        return full.replace(noteText, '').trim();
     }
 
     function copyTableData() {
@@ -620,7 +862,7 @@
 
         table.querySelectorAll('tbody tr').forEach(row => {
             if (row.classList.contains('rf-hide')) return;
-            const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim());
+            const cells = Array.from(row.querySelectorAll('td')).map(td => getCellTextForCopy(td));
             if (cells.length > 0) {
                 data.push(cells.join('\t'));
                 copiedCount++;
@@ -831,7 +1073,7 @@
 
         const countDiv = document.createElement('div');
         countDiv.id = 'rf-count';
-        countDiv.textContent = '-';
+        countDiv.innerHTML = '<span class="rf-count-label">表示</span><span class="rf-count-val">-</span>';
         left.appendChild(countDiv);
 
         const dupDiv = document.createElement('div');
@@ -858,35 +1100,7 @@
 
         const legend = document.createElement('div');
         legend.id = 'rf-legend';
-
-        [
-            { color: ACTIVE_COLOR,    label: '実行中' },
-            { color: DUPLICATE_COLOR, label: '次Cycle重複' }
-        ].forEach(({ color, label }) => {
-            const item = document.createElement('div');
-            item.className = 'rf-legend-item';
-
-            const box = document.createElement('div');
-            box.className = 'rf-legend-color';
-            box.style.background = color;
-
-            item.appendChild(box);
-            item.appendChild(document.createTextNode(label));
-            legend.appendChild(item);
-        });
-
-        const comboItem = document.createElement('div');
-        comboItem.className = 'rf-legend-item';
-
-        const comboBox = document.createElement('div');
-        comboBox.className = 'rf-legend-color';
-        comboBox.style.cssText = 'background:' + ACTIVE_COLOR + ';color:#c00;font-weight:bold;font-size:9px;text-align:center;line-height:14px;';
-        comboBox.textContent = '名';
-
-        comboItem.appendChild(comboBox);
-        comboItem.appendChild(document.createTextNode('実行中＋重複'));
-        legend.appendChild(comboItem);
-
+        // 凡例表示は不要のため空にしています
         left.appendChild(legend);
 
         const vdiv = document.createElement('div');
