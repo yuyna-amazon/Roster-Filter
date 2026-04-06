@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.4
+// @version      5.5
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker
@@ -22,17 +22,21 @@
         if (!str) return null;
         const m = str.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
         if (!m) return null;
+
         let h = parseInt(m[1], 10);
         const min = parseInt(m[2], 10);
         const p = m[3].toLowerCase();
+
         if (p === 'am' && h === 12) h = 0;
         if (p === 'pm' && h !== 12) h += 12;
+
         return h * 60 + min;
     }
 
     function parseTimeToDate(str) {
         const mins = parseTimeToMinutes(str);
         if (mins === null) return null;
+
         const now = new Date();
         return new Date(
             now.getFullYear(),
@@ -42,6 +46,19 @@
             mins % 60,
             0
         );
+    }
+
+    function minutesToDisplayTime(mins) {
+        if (mins === null || mins === undefined || mins === Infinity) return '-';
+
+        let h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const ampm = h >= 12 ? 'pm' : 'am';
+
+        h = h % 12;
+        if (h === 0) h = 12;
+
+        return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
     }
 
     /* ======================================================
@@ -62,7 +79,9 @@
     ];
 
     const FILTER_INDEX = {};
-    FILTERS.forEach((f, i) => { FILTER_INDEX[f.key] = i; });
+    FILTERS.forEach((f, i) => {
+        FILTER_INDEX[f.key] = i;
+    });
 
     const EXCLUDED_TYPES  = ['AmFlex Kei Van (ProDP)'];
     const ACTIVE_COLOR    = '#ffffcc';
@@ -73,6 +92,7 @@
     ====================================================== */
 
     const cycleNamesCache = {};
+    const cycleTimeCache  = {};
     let nextCycleNames = new Set();
     let nextCycleKey   = null;
     let isProcessing   = false;
@@ -105,7 +125,10 @@
             padding-bottom: 6px;
             border-bottom: 2px solid #ff9900;
         }
-        #rf-header span { font-weight: bold; font-size: 13px; }
+        #rf-header span {
+            font-weight: bold;
+            font-size: 13px;
+        }
         #rf-toggle {
             background: none;
             border: none;
@@ -119,7 +142,9 @@
             flex-direction: row;
             align-items: flex-start;
         }
-        #rf-content.hide { display: none; }
+        #rf-content.hide {
+            display: none;
+        }
 
         #rf-left {
             min-width: 130px;
@@ -160,6 +185,7 @@
             border-radius: 3px;
             color: #c00;
             font-size: 11px;
+            line-height: 1.5;
         }
 
         #rf-btn-group {
@@ -179,14 +205,18 @@
             background: #fff;
             color: #232f3e;
         }
-        .rf-btn:hover { background: #f0f0f0; }
+        .rf-btn:hover {
+            background: #f0f0f0;
+        }
 
         .rf-btn-green {
             border: none;
             background-color: #4CAF50;
             color: white;
         }
-        .rf-btn-green:hover { background-color: #45a049; }
+        .rf-btn-green:hover {
+            background-color: #45a049;
+        }
 
         #rf-legend {
             margin-top: 8px;
@@ -239,7 +269,9 @@
             color: #f44336;
         }
 
-        .rf-hide { display: none !important; }
+        .rf-hide {
+            display: none !important;
+        }
 
         .rf-notification {
             position: fixed;
@@ -268,8 +300,13 @@
         localStorage.setItem(STORAGE_KEY, key);
     }
 
+    function getFilterByKey(key) {
+        return FILTERS.find(f => f.key === key) || null;
+    }
+
     function getCategory(min) {
         if (min === null) return null;
+
         for (const f of FILTERS) {
             if (f.key === 'ALL') continue;
             if (f.min === f.max ? min === f.min : min >= f.min && min < f.max) {
@@ -296,7 +333,7 @@
 
     function doFilter() {
         const selected = document.querySelector('#rf-panel input:checked');
-        const key  = selected ? selected.value : getSavedFilter();
+        const key = selected ? selected.value : getSavedFilter();
         const rows = getRows();
 
         let total = 0;
@@ -327,14 +364,17 @@
     }
 
     /* ======================================================
-       サイクルの名前キャッシュ管理
+       サイクルの名前・時間キャッシュ管理
     ====================================================== */
 
-    function cacheNamesForFilter(filterKey) {
+    function cacheNamesAndTimesForFilter(filterKey) {
         if (filterKey === 'ALL') return;
 
-        const rows  = getRows();
+        const rows = getRows();
         const names = new Set();
+
+        let minStart = null;
+        let maxEnd = null;
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -344,7 +384,8 @@
             const serviceTypeTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
             if (serviceTypeTd && EXCLUDED_TYPES.includes(serviceTypeTd.textContent.trim())) continue;
 
-            const cat = getCategory(parseTimeToMinutes(startTimeTd.textContent));
+            const startText = startTimeTd.textContent.trim();
+            const cat = getCategory(parseTimeToMinutes(startText));
             if (cat !== filterKey) continue;
 
             const nameTd = row.querySelector('td[data-bind="text: DAName"]');
@@ -352,28 +393,40 @@
                 const n = nameTd.textContent.trim();
                 if (n) names.add(n);
             }
+
+            const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
+            const startMins = parseTimeToMinutes(startText);
+            const endMins = parseTimeToMinutes(endTimeTd ? endTimeTd.textContent.trim() : '');
+
+            if (startMins !== null && (minStart === null || startMins < minStart)) {
+                minStart = startMins;
+            }
+            if (endMins !== null && (maxEnd === null || endMins > maxEnd)) {
+                maxEnd = endMins;
+            }
         }
 
         cycleNamesCache[filterKey] = names;
+        cycleTimeCache[filterKey] = {
+            start: minStart,
+            end: maxEnd
+        };
     }
 
     function cacheAllCycleNames() {
         FILTERS.forEach(f => {
-            if (f.key !== 'ALL') cacheNamesForFilter(f.key);
+            if (f.key !== 'ALL') cacheNamesAndTimesForFilter(f.key);
         });
     }
 
     function setNextCycleNames(currentKey) {
         const nKey = getNextCycleKey(currentKey);
-        nextCycleKey   = nKey;
+        nextCycleKey = nKey;
         nextCycleNames = (nKey && cycleNamesCache[nKey]) ? cycleNamesCache[nKey] : new Set();
     }
 
     /* ======================================================
        Highlighter
-       修正点:
-       - 重複判定 isDuplicate は終了済みでも常に実施
-       - 実行中判定 isActive のみ endTime >= now を使う
     ====================================================== */
 
     function highlightRows() {
@@ -381,7 +434,7 @@
         isProcessing = true;
 
         const rows = Array.from(getRows());
-        const now  = new Date();
+        const now = new Date();
 
         const selectedFilter = document.querySelector('#rf-panel input:checked');
         const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
@@ -407,18 +460,18 @@
                 }
 
                 const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
-                const endTimeTd      = row.querySelector('td[data-bind="text: endTime"]');
+                const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
 
                 const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
-                const endTime      = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
-                const name         = nameTd ? nameTd.textContent.trim() : '';
+                const endTime = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
+                const name = nameTd ? nameTd.textContent.trim() : '';
 
                 let newColor = '';
                 let isActive = false;
                 let isDuplicate = false;
 
                 isDuplicate = checkDuplicates && !!name && nextCycleNames.has(name);
-                isActive    = (!endTime || endTime >= now) && (availability === '実行中');
+                isActive = (!endTime || endTime >= now) && (availability === '実行中');
 
                 if (isDuplicate) duplicateCount++;
 
@@ -467,8 +520,23 @@
             if (countDiv) countDiv.after(dupDiv);
         }
 
+        const nextCycleTimes = cycleTimeCache[nextCycleKey] || {};
+        const fallbackFilter = getFilterByKey(nextCycleKey);
+
+        const startText = nextCycleTimes.start !== null && nextCycleTimes.start !== undefined
+            ? minutesToDisplayTime(nextCycleTimes.start)
+            : (fallbackFilter ? minutesToDisplayTime(fallbackFilter.min) : '-');
+
+        const endText = nextCycleTimes.end !== null && nextCycleTimes.end !== undefined
+            ? minutesToDisplayTime(nextCycleTimes.end)
+            : (fallbackFilter && fallbackFilter.max !== Infinity ? minutesToDisplayTime(fallbackFilter.max) : '-');
+
         dupDiv.style.display = 'block';
-        dupDiv.innerHTML = nextCycleKey + 'と重複: <strong>' + count + '名</strong>';
+        dupDiv.innerHTML =
+            '<div><strong>' + nextCycleKey + '</strong></div>' +
+            '<div>開始時間: ' + startText + '</div>' +
+            '<div>終了時間: ' + endText + '</div>' +
+            '<div>重複: <strong>' + count + '名</strong></div>';
     }
 
     /* ======================================================
@@ -477,7 +545,7 @@
 
     function showNotification(message) {
         const n = document.createElement('div');
-        n.className   = 'rf-notification';
+        n.className = 'rf-notification';
         n.textContent = message;
         document.body.appendChild(n);
         setTimeout(() => n.remove(), 3000);
@@ -695,8 +763,8 @@
         FILTERS.forEach(f => {
             const lbl = document.createElement('label');
             const inp = document.createElement('input');
-            inp.type  = 'radio';
-            inp.name  = 'rf-filter';
+            inp.type = 'radio';
+            inp.name = 'rf-filter';
             inp.value = f.key;
             if (f.key === savedKey) inp.checked = true;
 
@@ -817,8 +885,10 @@
     function init() {
         createPanel();
         cacheAllCycleNames();
+
         const savedKey = getSavedFilter();
         setNextCycleNames(savedKey);
+
         doFilter();
         highlightRows();
         calculateBlocks();
@@ -834,5 +904,4 @@
     }
 
     setTimeout(waitForTable, 2000);
-
 })();
