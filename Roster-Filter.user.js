@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.6
+// @version      5.7
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
-// @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle time in table body
+// @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
 // @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
@@ -48,17 +48,13 @@
         );
     }
 
-    function minutesToDisplayTime(mins) {
-        if (mins === null || mins === undefined || mins === Infinity) return '-';
-
-        let h = Math.floor(mins / 60);
-        const m = mins % 60;
-        const ampm = h >= 12 ? 'pm' : 'am';
-
-        h = h % 12;
-        if (h === 0) h = 12;
-
-        return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+    function escapeHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     /* ======================================================
@@ -87,9 +83,6 @@
     const ACTIVE_COLOR    = '#ffffcc';
     const DUPLICATE_COLOR = '#ffcccc';
 
-    const NEXT_START_COL_CLASS = 'rf-next-cycle-start';
-    const NEXT_END_COL_CLASS   = 'rf-next-cycle-end';
-
     /* ======================================================
        状態管理
     ====================================================== */
@@ -99,6 +92,7 @@
     let nextCycleNames = new Set();
     let nextCycleKey   = null;
     let isProcessing   = false;
+    let observer       = null;
 
     /* ======================================================
        CSS
@@ -128,10 +122,7 @@
             padding-bottom: 6px;
             border-bottom: 2px solid #ff9900;
         }
-        #rf-header span {
-            font-weight: bold;
-            font-size: 13px;
-        }
+        #rf-header span { font-weight: bold; font-size: 13px; }
         #rf-toggle {
             background: none;
             border: none;
@@ -145,9 +136,7 @@
             flex-direction: row;
             align-items: flex-start;
         }
-        #rf-content.hide {
-            display: none;
-        }
+        #rf-content.hide { display: none; }
 
         #rf-left {
             min-width: 130px;
@@ -208,18 +197,14 @@
             background: #fff;
             color: #232f3e;
         }
-        .rf-btn:hover {
-            background: #f0f0f0;
-        }
+        .rf-btn:hover { background: #f0f0f0; }
 
         .rf-btn-green {
             border: none;
             background-color: #4CAF50;
             color: white;
         }
-        .rf-btn-green:hover {
-            background-color: #45a049;
-        }
+        .rf-btn-green:hover { background-color: #45a049; }
 
         #rf-legend {
             margin-top: 8px;
@@ -272,9 +257,7 @@
             color: #f44336;
         }
 
-        .rf-hide {
-            display: none !important;
-        }
+        .rf-hide { display: none !important; }
 
         .rf-notification {
             position: fixed;
@@ -289,18 +272,14 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
-        th.${NEXT_START_COL_CLASS},
-        th.${NEXT_END_COL_CLASS},
-        td.${NEXT_START_COL_CLASS},
-        td.${NEXT_END_COL_CLASS} {
-            white-space: nowrap;
-        }
-
-        td.${NEXT_START_COL_CLASS},
-        td.${NEXT_END_COL_CLASS} {
-            font-weight: bold;
+        .rf-next-cycle-note {
+            display: block;
+            margin-top: 2px;
+            font-size: 10px;
+            line-height: 1.2;
             color: #c2185b;
-            background: rgba(255, 192, 203, 0.10);
+            font-weight: bold;
+            white-space: nowrap;
         }
     `;
     document.head.appendChild(style);
@@ -445,51 +424,56 @@
     }
 
     /* ======================================================
-       テーブル列追加
+       Bodyセルへ直接表示
     ====================================================== */
 
-    function ensureNextCycleColumns() {
-        const table = getTable();
-        if (!table) return;
-
-        const theadRow = table.querySelector('thead tr');
-        if (!theadRow) return;
-
-        if (!theadRow.querySelector('th.' + NEXT_START_COL_CLASS)) {
-            const th1 = document.createElement('th');
-            th1.className = NEXT_START_COL_CLASS;
-            th1.textContent = '次Cycle開始';
-            theadRow.appendChild(th1);
+    function restoreCellHtml(td) {
+        if (!td) return;
+        if (td.dataset.rfOriginalHtml !== undefined) {
+            td.innerHTML = td.dataset.rfOriginalHtml;
         }
+    }
 
-        if (!theadRow.querySelector('th.' + NEXT_END_COL_CLASS)) {
-            const th2 = document.createElement('th');
-            th2.className = NEXT_END_COL_CLASS;
-            th2.textContent = '次Cycle終了';
-            theadRow.appendChild(th2);
+    function rememberOriginalCellHtml(td) {
+        if (!td) return;
+        if (td.dataset.rfOriginalHtml === undefined) {
+            td.dataset.rfOriginalHtml = td.innerHTML;
         }
+    }
 
+    function clearNextCycleInfoFromBody() {
         getRows().forEach(row => {
-            if (!row.querySelector('td.' + NEXT_START_COL_CLASS)) {
-                const td1 = document.createElement('td');
-                td1.className = NEXT_START_COL_CLASS;
-                row.appendChild(td1);
-            }
-            if (!row.querySelector('td.' + NEXT_END_COL_CLASS)) {
-                const td2 = document.createElement('td');
-                td2.className = NEXT_END_COL_CLASS;
-                row.appendChild(td2);
-            }
+            const startTd = row.querySelector('td[data-bind="text: startTime"]');
+            const endTd   = row.querySelector('td[data-bind="text: endTime"]');
+            restoreCellHtml(startTd);
+            restoreCellHtml(endTd);
         });
     }
 
-    function clearNextCycleColumns() {
-        getRows().forEach(row => {
-            const startTd = row.querySelector('td.' + NEXT_START_COL_CLASS);
-            const endTd   = row.querySelector('td.' + NEXT_END_COL_CLASS);
-            if (startTd) startTd.textContent = '';
-            if (endTd) endTd.textContent = '';
-        });
+    function injectNextCycleInfoIntoBody(startTd, endTd, nextInfo) {
+        if (!startTd || !endTd || !nextInfo) return;
+
+        rememberOriginalCellHtml(startTd);
+        rememberOriginalCellHtml(endTd);
+
+        const startBase = escapeHtml(startTd.textContent.trim());
+        const endBase   = escapeHtml(endTd.textContent.trim());
+
+        const nextStart = nextInfo.start !== null && nextInfo.start !== undefined
+            ? minutesToDisplayTime(nextInfo.start)
+            : '-';
+
+        const nextEnd = nextInfo.end !== null && nextInfo.end !== undefined
+            ? minutesToDisplayTime(nextInfo.end)
+            : '-';
+
+        startTd.innerHTML =
+            '<span>' + startBase + '</span>' +
+            '<span class="rf-next-cycle-note">→ 次: ' + escapeHtml(nextStart) + '</span>';
+
+        endTd.innerHTML =
+            '<span>' + endBase + '</span>' +
+            '<span class="rf-next-cycle-note">→ 次: ' + escapeHtml(nextEnd) + '</span>';
     }
 
     /* ======================================================
@@ -500,8 +484,7 @@
         if (isProcessing) return;
         isProcessing = true;
 
-        ensureNextCycleColumns();
-        clearNextCycleColumns();
+        clearNextCycleInfoFromBody();
 
         const rows = Array.from(getRows());
         const now = new Date();
@@ -522,8 +505,8 @@
             for (; index < end; index++) {
                 const row = rows[index];
                 const nameTd = row.querySelector('td[data-bind="text: DAName"]');
-                const nextStartTd = row.querySelector('td.' + NEXT_START_COL_CLASS);
-                const nextEndTd = row.querySelector('td.' + NEXT_END_COL_CLASS);
+                const startTd = row.querySelector('td[data-bind="text: startTime"]');
+                const endTd   = row.querySelector('td[data-bind="text: endTime"]');
 
                 if (row.classList.contains('rf-hide')) {
                     row.style.backgroundColor = '';
@@ -531,16 +514,15 @@
                         nameTd.style.color = '';
                         nameTd.style.fontWeight = '';
                     }
-                    if (nextStartTd) nextStartTd.textContent = '';
-                    if (nextEndTd) nextEndTd.textContent = '';
+                    restoreCellHtml(startTd);
+                    restoreCellHtml(endTd);
                     continue;
                 }
 
                 const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
-                const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
 
                 const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
-                const endTime = parseTimeToDate(endTimeTd ? endTimeTd.textContent.trim() : null);
+                const endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
                 const name = nameTd ? nameTd.textContent.trim() : '';
 
                 let newColor = '';
@@ -572,16 +554,11 @@
                     }
                 }
 
-                if (nextStartTd) {
-                    nextStartTd.textContent = (isDuplicate && nextInfo)
-                        ? minutesToDisplayTime(nextInfo.start)
-                        : '';
-                }
-
-                if (nextEndTd) {
-                    nextEndTd.textContent = (isDuplicate && nextInfo)
-                        ? minutesToDisplayTime(nextInfo.end)
-                        : '';
+                if (isDuplicate && nextInfo) {
+                    injectNextCycleInfoIntoBody(startTd, endTd, nextInfo);
+                } else {
+                    restoreCellHtml(startTd);
+                    restoreCellHtml(endTd);
                 }
             }
 
@@ -612,9 +589,10 @@
         }
 
         dupDiv.style.display = 'block';
-        dupDiv.innerHTML = '<div><strong>' + nextCycleKey + '</strong></div>' +
-                           '<div>重複: <strong>' + count + '名</strong></div>' +
-                           '<div style="margin-top:4px;">テーブル右端に次Cycle開始/終了を表示</div>';
+        dupDiv.innerHTML =
+            '<div><strong>' + nextCycleKey + '</strong></div>' +
+            '<div>重複: <strong>' + count + '名</strong></div>' +
+            '<div style="margin-top:4px;">ピンク行の開始/終了セル内に次Cycle時刻を表示</div>';
     }
 
     /* ======================================================
@@ -945,7 +923,6 @@
 
         refreshBtn.onclick = function() {
             cacheAllCycleNames();
-            ensureNextCycleColumns();
             const sel = document.querySelector('#rf-panel input:checked');
             const currentKey = sel ? sel.value : 'ALL';
             setNextCycleNames(currentKey);
@@ -958,12 +935,38 @@
     }
 
     /* ======================================================
+       再描画監視
+    ====================================================== */
+
+    function setupObserver() {
+        const table = getTable();
+        if (!table || observer) return;
+
+        observer = new MutationObserver(() => {
+            if (isProcessing) return;
+            setTimeout(() => {
+                cacheAllCycleNames();
+                const sel = document.querySelector('#rf-panel input:checked');
+                const currentKey = sel ? sel.value : getSavedFilter();
+                setNextCycleNames(currentKey);
+                doFilter();
+                highlightRows();
+                calculateBlocks();
+            }, 50);
+        });
+
+        observer.observe(table, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    /* ======================================================
        初期化
     ====================================================== */
 
     function init() {
         createPanel();
-        ensureNextCycleColumns();
         cacheAllCycleNames();
 
         const savedKey = getSavedFilter();
@@ -972,6 +975,7 @@
         doFilter();
         highlightRows();
         calculateBlocks();
+        setupObserver();
     }
 
     function waitForTable() {
