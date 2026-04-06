@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      5.5
+// @version      5.6
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
-// @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker
+// @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle time in table body
 // @match        https://logistics.amazon.co.jp/internal/capacity/rosterview*
 // @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
@@ -87,12 +87,15 @@
     const ACTIVE_COLOR    = '#ffffcc';
     const DUPLICATE_COLOR = '#ffcccc';
 
+    const NEXT_START_COL_CLASS = 'rf-next-cycle-start';
+    const NEXT_END_COL_CLASS   = 'rf-next-cycle-end';
+
     /* ======================================================
        状態管理
     ====================================================== */
 
     const cycleNamesCache = {};
-    const cycleTimeCache  = {};
+    const cycleDetailCache = {};
     let nextCycleNames = new Set();
     let nextCycleKey   = null;
     let isProcessing   = false;
@@ -285,6 +288,20 @@
             font: 12px Arial, sans-serif;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
+
+        th.${NEXT_START_COL_CLASS},
+        th.${NEXT_END_COL_CLASS},
+        td.${NEXT_START_COL_CLASS},
+        td.${NEXT_END_COL_CLASS} {
+            white-space: nowrap;
+        }
+
+        td.${NEXT_START_COL_CLASS},
+        td.${NEXT_END_COL_CLASS} {
+            font-weight: bold;
+            color: #c2185b;
+            background: rgba(255, 192, 203, 0.10);
+        }
     `;
     document.head.appendChild(style);
 
@@ -298,10 +315,6 @@
 
     function saveFilter(key) {
         localStorage.setItem(STORAGE_KEY, key);
-    }
-
-    function getFilterByKey(key) {
-        return FILTERS.find(f => f.key === key) || null;
     }
 
     function getCategory(min) {
@@ -364,17 +377,15 @@
     }
 
     /* ======================================================
-       サイクルの名前・時間キャッシュ管理
+       次Cycle情報キャッシュ
     ====================================================== */
 
-    function cacheNamesAndTimesForFilter(filterKey) {
+    function cacheDetailsForFilter(filterKey) {
         if (filterKey === 'ALL') return;
 
         const rows = getRows();
         const names = new Set();
-
-        let minStart = null;
-        let maxEnd = null;
+        const detailMap = new Map();
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -389,33 +400,41 @@
             if (cat !== filterKey) continue;
 
             const nameTd = row.querySelector('td[data-bind="text: DAName"]');
-            if (nameTd) {
-                const n = nameTd.textContent.trim();
-                if (n) names.add(n);
-            }
-
             const endTimeTd = row.querySelector('td[data-bind="text: endTime"]');
-            const startMins = parseTimeToMinutes(startText);
-            const endMins = parseTimeToMinutes(endTimeTd ? endTimeTd.textContent.trim() : '');
 
-            if (startMins !== null && (minStart === null || startMins < minStart)) {
-                minStart = startMins;
-            }
-            if (endMins !== null && (maxEnd === null || endMins > maxEnd)) {
-                maxEnd = endMins;
+            const name = nameTd ? nameTd.textContent.trim() : '';
+            const endText = endTimeTd ? endTimeTd.textContent.trim() : '';
+
+            if (!name) continue;
+
+            names.add(name);
+
+            const startMins = parseTimeToMinutes(startText);
+            const endMins = parseTimeToMinutes(endText);
+
+            if (!detailMap.has(name)) {
+                detailMap.set(name, {
+                    start: startMins,
+                    end: endMins
+                });
+            } else {
+                const cur = detailMap.get(name);
+                if (startMins !== null && (cur.start === null || startMins < cur.start)) {
+                    cur.start = startMins;
+                }
+                if (endMins !== null && (cur.end === null || endMins > cur.end)) {
+                    cur.end = endMins;
+                }
             }
         }
 
         cycleNamesCache[filterKey] = names;
-        cycleTimeCache[filterKey] = {
-            start: minStart,
-            end: maxEnd
-        };
+        cycleDetailCache[filterKey] = detailMap;
     }
 
     function cacheAllCycleNames() {
         FILTERS.forEach(f => {
-            if (f.key !== 'ALL') cacheNamesAndTimesForFilter(f.key);
+            if (f.key !== 'ALL') cacheDetailsForFilter(f.key);
         });
     }
 
@@ -426,6 +445,54 @@
     }
 
     /* ======================================================
+       テーブル列追加
+    ====================================================== */
+
+    function ensureNextCycleColumns() {
+        const table = getTable();
+        if (!table) return;
+
+        const theadRow = table.querySelector('thead tr');
+        if (!theadRow) return;
+
+        if (!theadRow.querySelector('th.' + NEXT_START_COL_CLASS)) {
+            const th1 = document.createElement('th');
+            th1.className = NEXT_START_COL_CLASS;
+            th1.textContent = '次Cycle開始';
+            theadRow.appendChild(th1);
+        }
+
+        if (!theadRow.querySelector('th.' + NEXT_END_COL_CLASS)) {
+            const th2 = document.createElement('th');
+            th2.className = NEXT_END_COL_CLASS;
+            th2.textContent = '次Cycle終了';
+            theadRow.appendChild(th2);
+        }
+
+        getRows().forEach(row => {
+            if (!row.querySelector('td.' + NEXT_START_COL_CLASS)) {
+                const td1 = document.createElement('td');
+                td1.className = NEXT_START_COL_CLASS;
+                row.appendChild(td1);
+            }
+            if (!row.querySelector('td.' + NEXT_END_COL_CLASS)) {
+                const td2 = document.createElement('td');
+                td2.className = NEXT_END_COL_CLASS;
+                row.appendChild(td2);
+            }
+        });
+    }
+
+    function clearNextCycleColumns() {
+        getRows().forEach(row => {
+            const startTd = row.querySelector('td.' + NEXT_START_COL_CLASS);
+            const endTd   = row.querySelector('td.' + NEXT_END_COL_CLASS);
+            if (startTd) startTd.textContent = '';
+            if (endTd) endTd.textContent = '';
+        });
+    }
+
+    /* ======================================================
        Highlighter
     ====================================================== */
 
@@ -433,12 +500,18 @@
         if (isProcessing) return;
         isProcessing = true;
 
+        ensureNextCycleColumns();
+        clearNextCycleColumns();
+
         const rows = Array.from(getRows());
         const now = new Date();
 
         const selectedFilter = document.querySelector('#rf-panel input:checked');
         const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
         const checkDuplicates = currentKey !== 'ALL' && nextCycleNames.size > 0;
+        const nextDetailMap = nextCycleKey && cycleDetailCache[nextCycleKey]
+            ? cycleDetailCache[nextCycleKey]
+            : new Map();
 
         let duplicateCount = 0;
         let index = 0;
@@ -449,6 +522,8 @@
             for (; index < end; index++) {
                 const row = rows[index];
                 const nameTd = row.querySelector('td[data-bind="text: DAName"]');
+                const nextStartTd = row.querySelector('td.' + NEXT_START_COL_CLASS);
+                const nextEndTd = row.querySelector('td.' + NEXT_END_COL_CLASS);
 
                 if (row.classList.contains('rf-hide')) {
                     row.style.backgroundColor = '';
@@ -456,6 +531,8 @@
                         nameTd.style.color = '';
                         nameTd.style.fontWeight = '';
                     }
+                    if (nextStartTd) nextStartTd.textContent = '';
+                    if (nextEndTd) nextEndTd.textContent = '';
                     continue;
                 }
 
@@ -469,6 +546,8 @@
                 let newColor = '';
                 let isActive = false;
                 let isDuplicate = false;
+
+                const nextInfo = name ? nextDetailMap.get(name) : null;
 
                 isDuplicate = checkDuplicates && !!name && nextCycleNames.has(name);
                 isActive = (!endTime || endTime >= now) && (availability === '実行中');
@@ -491,6 +570,18 @@
                         nameTd.style.color = '';
                         nameTd.style.fontWeight = '';
                     }
+                }
+
+                if (nextStartTd) {
+                    nextStartTd.textContent = (isDuplicate && nextInfo)
+                        ? minutesToDisplayTime(nextInfo.start)
+                        : '';
+                }
+
+                if (nextEndTd) {
+                    nextEndTd.textContent = (isDuplicate && nextInfo)
+                        ? minutesToDisplayTime(nextInfo.end)
+                        : '';
                 }
             }
 
@@ -520,23 +611,10 @@
             if (countDiv) countDiv.after(dupDiv);
         }
 
-        const nextCycleTimes = cycleTimeCache[nextCycleKey] || {};
-        const fallbackFilter = getFilterByKey(nextCycleKey);
-
-        const startText = nextCycleTimes.start !== null && nextCycleTimes.start !== undefined
-            ? minutesToDisplayTime(nextCycleTimes.start)
-            : (fallbackFilter ? minutesToDisplayTime(fallbackFilter.min) : '-');
-
-        const endText = nextCycleTimes.end !== null && nextCycleTimes.end !== undefined
-            ? minutesToDisplayTime(nextCycleTimes.end)
-            : (fallbackFilter && fallbackFilter.max !== Infinity ? minutesToDisplayTime(fallbackFilter.max) : '-');
-
         dupDiv.style.display = 'block';
-        dupDiv.innerHTML =
-            '<div><strong>' + nextCycleKey + '</strong></div>' +
-            '<div>開始時間: ' + startText + '</div>' +
-            '<div>終了時間: ' + endText + '</div>' +
-            '<div>重複: <strong>' + count + '名</strong></div>';
+        dupDiv.innerHTML = '<div><strong>' + nextCycleKey + '</strong></div>' +
+                           '<div>重複: <strong>' + count + '名</strong></div>' +
+                           '<div style="margin-top:4px;">テーブル右端に次Cycle開始/終了を表示</div>';
     }
 
     /* ======================================================
@@ -867,6 +945,7 @@
 
         refreshBtn.onclick = function() {
             cacheAllCycleNames();
+            ensureNextCycleColumns();
             const sel = document.querySelector('#rf-panel input:checked');
             const currentKey = sel ? sel.value : 'ALL';
             setNextCycleNames(currentKey);
@@ -884,6 +963,7 @@
 
     function init() {
         createPanel();
+        ensureNextCycleColumns();
         cacheAllCycleNames();
 
         const savedKey = getSavedFilter();
