@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      6.0
+// @version      6.1
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
