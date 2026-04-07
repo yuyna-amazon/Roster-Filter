@@ -755,7 +755,12 @@
                 const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
 
                 const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
-                const endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
+                const startTime = parseTimeToDate(startTd ? startTd.textContent.trim() : null);
+                let endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
+                // 終了時刻が開始時刻より前の場合は翌日終了とみなす
+                if (startTime && endTime && endTime < startTime) {
+                    endTime.setDate(endTime.getDate() + 1);
+                }
                 const name = nameTd ? nameTd.textContent.trim() : '';
                 const normalizedName = normalizeName(name);
 
