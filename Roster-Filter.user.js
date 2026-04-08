@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      6.1
+// @version      6.2
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -113,6 +113,7 @@
     let nextCycleKey   = null;
     let isProcessing   = false;
     let observer       = null;
+    let observerTimer  = null;
 
     /* ======================================================
        CSS
@@ -396,6 +397,26 @@
             color: #c2185b;
             opacity: 0.95;
         }
+        /* 属性 + 擬似要素方式: 内部ノードを追加せず注釈を表示（レンダリングで消えるのを抑制） */
+        .rf-has-next { position: relative; }
+        /* 一行表示: '9:00 pm' のように時刻と period を続けて表示 */
+        .rf-has-next::after {
+            content: attr(data-rf-next-time) " " attr(data-rf-next-period);
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11px;
+            line-height: 1;
+            color: #c2185b;
+            font-weight: bold;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 5;
+            max-width: 80px;
+            text-align: center;
+            overflow: visible;
+        }
         /* 別列として挿入するセルのスタイル */
         td.rf-next-cell {
             width: 48px;
@@ -648,6 +669,14 @@
             td.style.position = td.dataset.rfOriginalPosition || '';
             delete td.dataset.rfOriginalPosition;
         }
+        if (td.dataset.rfNext !== undefined) {
+            delete td.dataset.rfNext;
+        }
+        if (td.classList && td.classList.contains('rf-has-next')) {
+            td.classList.remove('rf-has-next');
+        }
+        if (td.dataset.rfNextTime !== undefined) delete td.dataset.rfNextTime;
+        if (td.dataset.rfNextPeriod !== undefined) delete td.dataset.rfNextPeriod;
     }
 
     function rememberOriginalCellHtml(td) {
@@ -697,16 +726,24 @@
         const timePart = parts[0] || nextStart;
         const periodPart = parts[1] || '';
 
-        // 既存のセル内容はそのままに、絶対配置の注釈要素を追加する（列幅を変えない）
-        // まず既に挿入済みの注釈があれば削除
-        const existing = endTd.querySelector('.rf-next-cycle-inline');
-        if (existing) existing.remove();
-
-        const note = document.createElement('span');
-        note.className = 'rf-next-cycle-inline';
-        note.innerHTML = '<span class="rf-next-time">' + escapeHtml(timePart) + '</span>'
-            + (periodPart ? '<span class="rf-next-period">' + escapeHtml(periodPart) + '</span>' : '');
-        endTd.appendChild(note);
+        // ページ（フレームワーク）がセル内部を上書きすると
+        // 追加したノードは消えてしまうため、属性 + 擬似要素で注釈を表示する。
+        const timeAttr = timePart || '';
+        const periodAttr = periodPart || '';
+        try {
+            endTd.dataset.rfNextTime = timeAttr;
+            endTd.dataset.rfNextPeriod = periodAttr;
+            if (endTd.classList) endTd.classList.add('rf-has-next');
+        } catch (e) {
+            // dataset 書き込み失敗した場合はフォールバックで要素を挿入
+            const existing = endTd.querySelector('.rf-next-cycle-inline');
+            if (existing) existing.remove();
+            const note = document.createElement('span');
+            note.className = 'rf-next-cycle-inline';
+            note.innerHTML = '<span class="rf-next-time">' + escapeHtml(timePart) + '</span>'
+                + (periodPart ? '<span class="rf-next-period">' + escapeHtml(periodPart) + '</span>' : '');
+            endTd.appendChild(note);
+        }
     }
 
     /* ======================================================
@@ -847,10 +884,13 @@
 
     function getCellTextForCopy(td) {
         if (!td) return '';
-        const note = td.querySelector('.rf-next-cycle-note, .rf-next-cycle-inline');
-        if (!note) return td.textContent.trim();
+        // 注釈が属性ベースまたは内部ノードで存在する可能性がある
+        const attrNote = td.dataset && (td.dataset.rfNextTime || td.dataset.rfNext) ?
+            ((td.dataset.rfNextTime || '') + (td.dataset.rfNextPeriod ? ' ' + td.dataset.rfNextPeriod : '')) : null;
+        const nodeNote = td.querySelector('.rf-next-cycle-note, .rf-next-cycle-inline');
+        if (!attrNote && !nodeNote) return td.textContent.trim();
         const full = td.textContent || '';
-        const noteText = note.textContent || '';
+        const noteText = nodeNote ? (nodeNote.textContent || '') : (attrNote || '');
         return full.replace(noteText, '').trim();
     }
 
@@ -1163,7 +1203,8 @@
 
         observer = new MutationObserver(() => {
             if (isProcessing) return;
-            setTimeout(() => {
+            clearTimeout(observerTimer);
+            observerTimer = setTimeout(() => {
                 cacheAllCycleNames();
                 const sel = document.querySelector('#rf-panel input:checked');
                 const currentKey = sel ? sel.value : getSavedFilter();
