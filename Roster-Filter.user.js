@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      6.2
+// @version      6.5
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -68,15 +68,6 @@
         return String(dispH) + ':' + (m < 10 ? '0' + m : String(m)) + ' ' + period;
     }
 
-    function escapeHtml(str) {
-        return String(str == null ? '' : str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
     /* ======================================================
        定数
     ====================================================== */
@@ -114,6 +105,7 @@
     let isProcessing   = false;
     let observer       = null;
     let observerTimer  = null;
+    let suppressObserver = false;
 
     /* ======================================================
        CSS
@@ -250,18 +242,6 @@
             border-radius: 3px;
             font-size: 10px;
         }
-        .rf-legend-item {
-            display: flex;
-            align-items: center;
-            margin: 2px 0;
-        }
-        .rf-legend-color {
-            width: 14px;
-            height: 14px;
-            border-radius: 2px;
-            margin-right: 6px;
-            border: 1px solid #ccc;
-        }
 
         .rf-block-header {
             background: #fff3e0;
@@ -309,149 +289,51 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
-        .rf-start-base {
-            display: inline-block;
+        td.rf-has-next {
             position: relative;
-            max-width: 100%;
+            padding-right: 48px !important;
             box-sizing: border-box;
+            line-height: 20px !important;
+            vertical-align: middle !important;
         }
-        .rf-start-base .rf-start-base-text {
-            display: inline-block;
-        }
-        .rf-next-cycle-note {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            top: 100%;
-            margin-top: 2px;
-            font-size: 10px;
-            line-height: 1.1;
-            color: #c2185b;
-            font-weight: bold;
-            white-space: normal;
-            background: rgba(255,255,255,0.95);
-            padding: 2px 6px;
-            border-radius: 3px;
-            max-width: calc(100% - 8px);
-            box-sizing: border-box;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-            text-align: center;
-            z-index: 3;
-            pointer-events: none;
-            display: block;
-        }
-        /* インラインで右側に表示する注釈 (横並び) */
-        .rf-end-inline {
-            /* 表示フローに影響を与えないインラインラッパー
-               注釈はセルに対して絶対配置するのでここでは位置を変えない */
-            position: static;
-            display: inline;
-            vertical-align: middle;
-        }
-        .rf-end-text {
-            display: inline-block;
-            /* 基本の時刻表示は他の行と揃えるため余白を与えない（位置は変えない） */
-            padding-right: 0;
-            box-sizing: border-box;
-            min-width: 0;
-        }
-        .rf-next-cycle-inline {
-            position: absolute;
-            /* ベース文字列の右側に収める（セル内で被らないように少し余裕を持たせる） */
-            right: 6px;
-            top: 50%;
-            transform: translateY(-50%);
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            line-height: 1;
-            color: #c2185b;
-            font-weight: bold;
-            white-space: nowrap;
-            background: transparent;
-            padding: 0 2px;
-            pointer-events: none;
-            z-index: 5;
-            max-width: 40px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .rf-next-cycle-inline .rf-next-time {
-            display: block;
-            font-size: 11px;
-            line-height: 1;
-            width: 40px;
-            max-width: 40px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            text-align: center;
-        }
-        .rf-next-cycle-inline .rf-next-period {
-            display: block;
-            font-size: 10px;
-            line-height: 1;
-            color: #c2185b;
-            opacity: 0.95;
-        }
-        /* 属性 + 擬似要素方式: 内部ノードを追加せず注釈を表示（レンダリングで消えるのを抑制） */
-        .rf-has-next { position: relative; }
-        /* 一行表示: '9:00 pm' のように時刻と period を続けて表示 */
+
         .rf-has-next::after {
             content: attr(data-rf-next-time) " " attr(data-rf-next-period);
             position: absolute;
-            right: 6px;
-            top: 50%;
+            right: 2px;
+            top: calc(50% - 1px);
             transform: translateY(-50%);
-            font-size: 11px;
-            line-height: 1;
+            font-size: 10px;
+            line-height: 10px;
+            letter-spacing: 0;
             color: #c2185b;
             font-weight: bold;
             white-space: nowrap;
             pointer-events: none;
             z-index: 5;
-            max-width: 80px;
             text-align: center;
             overflow: visible;
-        }
-        /* 別列として挿入するセルのスタイル */
-        td.rf-next-cell {
-            width: 48px;
-            max-width: 48px;
-            padding: 2px 4px;
-            text-align: center;
-            vertical-align: middle;
-            font-size: 11px;
-            color: #c2185b;
-            font-weight: bold;
             background: transparent;
-        }
-        td.rf-next-cell .rf-next-time { font-size: 12px; }
-        td.rf-next-cell .rf-next-period { font-size: 11px; color: #c2185b; opacity: 0.95; }
-        /* 行間を広げないため、インナーは詰めて表示 */
-        .rf-next-cell-inner {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 0;
-            line-height: 1;
             margin: 0;
             padding: 0;
         }
-        td.rf-next-cell .rf-next-time,
-        td.rf-next-cell .rf-next-period {
-            display: block;
-            margin: 0;
-            padding: 0;
-            line-height: 1;
-        }
-        th.rf-next-header { width: 48px; max-width: 48px; }
     `;
     document.head.appendChild(style);
+
+    /* ======================================================
+       共通実行ラッパー
+    ====================================================== */
+
+    function runInternalUpdate(fn) {
+        suppressObserver = true;
+        try {
+            fn();
+        } finally {
+            setTimeout(() => {
+                suppressObserver = false;
+            }, 0);
+        }
+    }
 
     /* ======================================================
        Filter
@@ -572,8 +454,11 @@
         }
 
         const cnt = document.getElementById('rf-count');
-        if (cnt) cnt.innerHTML = '<span class="rf-count-label">表示</span>'
-            + '<span class="rf-count-val">' + visible + ' / ' + total + '</span>';
+        if (cnt) {
+            cnt.innerHTML =
+                '<span class="rf-count-label">表示</span>' +
+                '<span class="rf-count-val">' + visible + ' / ' + total + '</span>';
+        }
     }
 
     /* ======================================================
@@ -595,15 +480,12 @@
             const serviceTypeTd = row.querySelector('td[data-bind="text: serviceTypeName"]');
             if (serviceTypeTd && EXCLUDED_TYPES.includes(serviceTypeTd.textContent.trim())) continue;
 
-            restoreCellHtml(startTimeTd);
-            const endTimeTd = getEndTimeCell(row);
-            restoreCellHtml(endTimeTd);
-
             const startText = startTimeTd.textContent.trim();
             const cat = getCategory(parseTimeToMinutes(startText));
             if (cat !== filterKey) continue;
 
             const nameTd = getNameCell(row);
+            const endTimeTd = getEndTimeCell(row);
 
             const name = nameTd ? nameTd.textContent.trim() : '';
             const normalizedName = normalizeName(name);
@@ -636,7 +518,6 @@
     }
 
     function cacheAllCycleNames() {
-        clearNextCycleInfoFromBody();
         FILTERS.forEach(f => {
             if (f.key !== 'ALL') cacheDetailsForFilter(f.key);
         });
@@ -645,6 +526,7 @@
     function setNextCycleNames(currentKey) {
         const nKey = getNextCycleKey(currentKey);
         nextCycleKey = nKey;
+
         if (!nKey) {
             nextCycleNames = new Set();
             return;
@@ -660,65 +542,69 @@
        Bodyセルへ直接表示
     ====================================================== */
 
+    function rememberOriginalCellState(td) {
+        if (!td) return;
+        if (td.dataset.rfOriginalPosition === undefined) {
+            td.dataset.rfOriginalPosition = td.style.position || '';
+        }
+        if (td.dataset.rfOriginalPaddingRight === undefined) {
+            td.dataset.rfOriginalPaddingRight = td.style.paddingRight || '';
+        }
+        if (td.dataset.rfOriginalLineHeight === undefined) {
+            td.dataset.rfOriginalLineHeight = td.style.lineHeight || '';
+        }
+        if (td.dataset.rfOriginalVerticalAlign === undefined) {
+            td.dataset.rfOriginalVerticalAlign = td.style.verticalAlign || '';
+        }
+    }
+
     function restoreCellHtml(td) {
         if (!td) return;
-        if (td.dataset.rfOriginalHtml !== undefined) {
-            td.innerHTML = td.dataset.rfOriginalHtml;
-        }
+
         if (td.dataset.rfOriginalPosition !== undefined) {
             td.style.position = td.dataset.rfOriginalPosition || '';
             delete td.dataset.rfOriginalPosition;
         }
-        if (td.dataset.rfNext !== undefined) {
-            delete td.dataset.rfNext;
+        if (td.dataset.rfOriginalPaddingRight !== undefined) {
+            td.style.paddingRight = td.dataset.rfOriginalPaddingRight || '';
+            delete td.dataset.rfOriginalPaddingRight;
         }
-        if (td.classList && td.classList.contains('rf-has-next')) {
+        if (td.dataset.rfOriginalLineHeight !== undefined) {
+            td.style.lineHeight = td.dataset.rfOriginalLineHeight || '';
+            delete td.dataset.rfOriginalLineHeight;
+        }
+        if (td.dataset.rfOriginalVerticalAlign !== undefined) {
+            td.style.verticalAlign = td.dataset.rfOriginalVerticalAlign || '';
+            delete td.dataset.rfOriginalVerticalAlign;
+        }
+
+        if (td.classList.contains('rf-has-next')) {
             td.classList.remove('rf-has-next');
         }
-        if (td.dataset.rfNextTime !== undefined) delete td.dataset.rfNextTime;
-        if (td.dataset.rfNextPeriod !== undefined) delete td.dataset.rfNextPeriod;
-    }
 
-    function rememberOriginalCellHtml(td) {
-        if (!td) return;
-        if (td.dataset.rfOriginalHtml === undefined) {
-            td.dataset.rfOriginalHtml = td.innerHTML;
-        }
-        if (td.dataset.rfOriginalPosition === undefined) {
-            td.dataset.rfOriginalPosition = td.style.position || '';
-        }
+        delete td.dataset.rfNextTime;
+        delete td.dataset.rfNextPeriod;
     }
 
     function clearNextCycleInfoFromBody() {
-        getRows().forEach(row => {
-            const startTd = getStartTimeCell(row);
-            const endTd   = getEndTimeCell(row);
-            restoreCellHtml(startTd);
-            restoreCellHtml(endTd);
-        });
-        // remove any previously inserted next-cycle cells/headers
         const table = getTable();
-        if (table) {
-            Array.from(table.querySelectorAll('td.rf-next-cell')).forEach(td => td.remove());
-            Array.from(table.querySelectorAll('th.rf-next-header')).forEach(th => th.remove());
-            try { delete table.dataset.rfNextColIndex; } catch (e) {}
-        }
+        if (!table) return;
+
+        table.querySelectorAll('td.rf-has-next').forEach(td => {
+            restoreCellHtml(td);
+        });
     }
 
-    // NOTE: 列挿入方式は列幅を崩すため廃止しました。
-    //       代わりに injectNextCycleInfoIntoBody() で endTd 内に
-    //       オーバーレイ表示します（レイアウトを崩しません）。
-
-    function injectNextCycleInfoIntoBody(startTd, endTd, nextInfo) {
+    function injectNextCycleInfoIntoBody(endTd, nextInfo) {
         if (!endTd || !nextInfo) return;
 
-        // startTd は表示しない（開始セルには何も注入しない）
-        // 終了セルには右側に次Cycleの開始時刻をインラインで表示する
-        // 保存（後で復元するため）するが、注釈は innerHTML を置き換えず append する
-        rememberOriginalCellHtml(endTd);
-        try { endTd.style.position = 'relative'; } catch (e) { /* ignore */ }
+        rememberOriginalCellState(endTd);
 
-        const nextStart = nextInfo.start !== null && nextInfo.start !== undefined
+        try {
+            endTd.style.position = 'relative';
+        } catch (e) {}
+
+        const nextStart = (nextInfo.start !== null && nextInfo.start !== undefined)
             ? minutesToDisplayTime(nextInfo.start)
             : '-';
 
@@ -726,24 +612,9 @@
         const timePart = parts[0] || nextStart;
         const periodPart = parts[1] || '';
 
-        // ページ（フレームワーク）がセル内部を上書きすると
-        // 追加したノードは消えてしまうため、属性 + 擬似要素で注釈を表示する。
-        const timeAttr = timePart || '';
-        const periodAttr = periodPart || '';
-        try {
-            endTd.dataset.rfNextTime = timeAttr;
-            endTd.dataset.rfNextPeriod = periodAttr;
-            if (endTd.classList) endTd.classList.add('rf-has-next');
-        } catch (e) {
-            // dataset 書き込み失敗した場合はフォールバックで要素を挿入
-            const existing = endTd.querySelector('.rf-next-cycle-inline');
-            if (existing) existing.remove();
-            const note = document.createElement('span');
-            note.className = 'rf-next-cycle-inline';
-            note.innerHTML = '<span class="rf-next-time">' + escapeHtml(timePart) + '</span>'
-                + (periodPart ? '<span class="rf-next-period">' + escapeHtml(periodPart) + '</span>' : '');
-            endTd.appendChild(note);
-        }
+        endTd.dataset.rfNextTime = timePart || '';
+        endTd.dataset.rfNextPeriod = periodPart || '';
+        endTd.classList.add('rf-has-next');
     }
 
     /* ======================================================
@@ -754,100 +625,100 @@
         if (isProcessing) return;
         isProcessing = true;
 
-        clearNextCycleInfoFromBody();
+        runInternalUpdate(() => {
+            clearNextCycleInfoFromBody();
 
-        const rows = Array.from(getRows());
-        const now = new Date();
+            const rows = Array.from(getRows());
+            const now = new Date();
 
-        const selectedFilter = document.querySelector('#rf-panel input:checked');
-        const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
-        const checkDuplicates = currentKey !== 'ALL' && nextCycleNames.size > 0;
-        const nextDetailMap = nextCycleKey && cycleDetailCache[nextCycleKey]
-            ? cycleDetailCache[nextCycleKey]
-            : new Map();
+            const selectedFilter = document.querySelector('#rf-panel input:checked');
+            const currentKey = selectedFilter ? selectedFilter.value : 'ALL';
+            const checkDuplicates = currentKey !== 'ALL' && nextCycleNames.size > 0;
+            const nextDetailMap = nextCycleKey && cycleDetailCache[nextCycleKey]
+                ? cycleDetailCache[nextCycleKey]
+                : new Map();
 
-        let duplicateCount = 0;
-        let index = 0;
+            let duplicateCount = 0;
+            let index = 0;
 
-        function processBatch() {
-            const end = Math.min(index + BATCH_SIZE, rows.length);
+            function processBatch() {
+                const end = Math.min(index + BATCH_SIZE, rows.length);
 
-            for (; index < end; index++) {
-                const row = rows[index];
-                const nameTd = getNameCell(row);
-                const startTd = getStartTimeCell(row);
-                const endTd   = getEndTimeCell(row);
+                for (; index < end; index++) {
+                    const row = rows[index];
+                    const nameTd = getNameCell(row);
+                    const startTd = getStartTimeCell(row);
+                    const endTd   = getEndTimeCell(row);
 
-                if (row.classList.contains('rf-hide')) {
-                    row.style.backgroundColor = '';
+                    if (row.classList.contains('rf-hide')) {
+                        row.style.backgroundColor = '';
+                        if (nameTd) {
+                            nameTd.style.color = '';
+                            nameTd.style.fontWeight = '';
+                        }
+                        if (endTd) restoreCellHtml(endTd);
+                        continue;
+                    }
+
+                    const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
+                    const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
+
+                    const startTime = parseTimeToDate(startTd ? startTd.textContent.trim() : null);
+                    let endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
+
+                    if (startTime && endTime && endTime < startTime) {
+                        endTime.setDate(endTime.getDate() + 1);
+                    }
+
+                    const name = nameTd ? nameTd.textContent.trim() : '';
+                    const normalizedName = normalizeName(name);
+
+                    let newColor = '';
+                    let isActive = false;
+                    let isDuplicate = false;
+
+                    const nextInfo = normalizedName ? nextDetailMap.get(normalizedName) : null;
+
+                    isDuplicate = checkDuplicates && !!normalizedName && nextCycleNames.has(normalizedName);
+                    isActive = (!endTime || endTime >= now) && (availability === '実行中');
+
+                    if (isDuplicate) duplicateCount++;
+
+                    if (isActive) {
+                        newColor = ACTIVE_COLOR;
+                    } else if (isDuplicate) {
+                        newColor = DUPLICATE_COLOR;
+                    }
+
+                    row.style.backgroundColor = newColor;
+
                     if (nameTd) {
-                        nameTd.style.color = '';
-                        nameTd.style.fontWeight = '';
+                        if (isActive && isDuplicate) {
+                            nameTd.style.color = '#c00';
+                            nameTd.style.fontWeight = 'bold';
+                        } else {
+                            nameTd.style.color = '';
+                            nameTd.style.fontWeight = '';
+                        }
                     }
-                    restoreCellHtml(startTd);
-                    restoreCellHtml(endTd);
-                    continue;
-                }
 
-                const availabilityTd = row.querySelector('td[data-bind="text: availability"]');
-
-                const availability = availabilityTd ? availabilityTd.textContent.trim() : '';
-                const startTime = parseTimeToDate(startTd ? startTd.textContent.trim() : null);
-                let endTime = parseTimeToDate(endTd ? endTd.textContent.trim() : null);
-                // 終了時刻が開始時刻より前の場合は翌日終了とみなす
-                if (startTime && endTime && endTime < startTime) {
-                    endTime.setDate(endTime.getDate() + 1);
-                }
-                const name = nameTd ? nameTd.textContent.trim() : '';
-                const normalizedName = normalizeName(name);
-
-                let newColor = '';
-                let isActive = false;
-                let isDuplicate = false;
-
-                const nextInfo = normalizedName ? nextDetailMap.get(normalizedName) : null;
-
-                isDuplicate = checkDuplicates && !!normalizedName && nextCycleNames.has(normalizedName);
-                isActive = (!endTime || endTime >= now) && (availability === '実行中');
-
-                if (isDuplicate) duplicateCount++;
-
-                if (isActive) {
-                    newColor = ACTIVE_COLOR;
-                } else if (isDuplicate) {
-                    newColor = DUPLICATE_COLOR;
-                }
-
-                row.style.backgroundColor = newColor;
-
-                if (nameTd) {
-                    if (isActive && isDuplicate) {
-                        nameTd.style.color = '#c00';
-                        nameTd.style.fontWeight = 'bold';
-                    } else {
-                        nameTd.style.color = '';
-                        nameTd.style.fontWeight = '';
+                    if (isDuplicate && nextInfo && endTd) {
+                        injectNextCycleInfoIntoBody(endTd, nextInfo);
+                    } else if (endTd) {
+                        restoreCellHtml(endTd);
                     }
                 }
 
-                if (isDuplicate && nextInfo) {
-                    // endTd 内にオーバーレイ注釈を表示（列幅は変えない）
-                    injectNextCycleInfoIntoBody(startTd, endTd, nextInfo);
+                if (index < rows.length) {
+                    setTimeout(processBatch, 0);
                 } else {
-                    restoreCellHtml(startTd);
-                    restoreCellHtml(endTd);
+                    updateDuplicateCount(duplicateCount, currentKey);
+                    isProcessing = false;
                 }
             }
 
-            if (index < rows.length) {
-                setTimeout(processBatch, 0);
-            } else {
-                updateDuplicateCount(duplicateCount, currentKey);
-                isProcessing = false;
-            }
-        }
-
-        processBatch();
+            processBatch();
+        });
     }
 
     function updateDuplicateCount(count, currentKey) {
@@ -866,8 +737,9 @@
         }
 
         dupDiv.style.display = 'flex';
-        dupDiv.innerHTML = '<span class="rf-dup-key"><strong>' + nextCycleKey + '</strong></span>'
-            + '<span class="rf-dup-val">重複: <strong>' + count + '名</strong></span>';
+        dupDiv.innerHTML =
+            '<span class="rf-dup-key"><strong>' + nextCycleKey + '</strong></span>' +
+            '<span class="rf-dup-val">重複: <strong>' + count + '名</strong></span>';
     }
 
     /* ======================================================
@@ -884,14 +756,15 @@
 
     function getCellTextForCopy(td) {
         if (!td) return '';
-        // 注釈が属性ベースまたは内部ノードで存在する可能性がある
-        const attrNote = td.dataset && (td.dataset.rfNextTime || td.dataset.rfNext) ?
-            ((td.dataset.rfNextTime || '') + (td.dataset.rfNextPeriod ? ' ' + td.dataset.rfNextPeriod : '')) : null;
-        const nodeNote = td.querySelector('.rf-next-cycle-note, .rf-next-cycle-inline');
-        if (!attrNote && !nodeNote) return td.textContent.trim();
+
+        const attrNote = td.dataset && td.dataset.rfNextTime
+            ? ((td.dataset.rfNextTime || '') + (td.dataset.rfNextPeriod ? ' ' + td.dataset.rfNextPeriod : ''))
+            : null;
+
+        if (!attrNote) return td.textContent.trim();
+
         const full = td.textContent || '';
-        const noteText = nodeNote ? (nodeNote.textContent || '') : (attrNote || '');
-        return full.replace(noteText, '').trim();
+        return full.replace(attrNote, '').trim();
     }
 
     function copyTableData() {
@@ -1145,7 +1018,6 @@
 
         const legend = document.createElement('div');
         legend.id = 'rf-legend';
-        // 凡例表示は不要のため空にしています
         left.appendChild(legend);
 
         const vdiv = document.createElement('div');
@@ -1168,10 +1040,13 @@
             if (e.target.name === 'rf-filter') {
                 const newKey = e.target.value;
                 saveFilter(newKey);
-                setNextCycleNames(newKey);
-                doFilter();
-                highlightRows();
-                calculateBlocks();
+
+                runInternalUpdate(() => {
+                    setNextCycleNames(newKey);
+                    doFilter();
+                    highlightRows();
+                    calculateBlocks();
+                });
             }
         });
 
@@ -1181,13 +1056,15 @@
         };
 
         refreshBtn.onclick = function() {
-            cacheAllCycleNames();
-            const sel = document.querySelector('#rf-panel input:checked');
-            const currentKey = sel ? sel.value : 'ALL';
-            setNextCycleNames(currentKey);
-            doFilter();
-            highlightRows();
-            calculateBlocks();
+            runInternalUpdate(() => {
+                cacheAllCycleNames();
+                const sel = document.querySelector('#rf-panel input:checked');
+                const currentKey = sel ? sel.value : 'ALL';
+                setNextCycleNames(currentKey);
+                doFilter();
+                highlightRows();
+                calculateBlocks();
+            });
         };
 
         copyBtn.onclick = copyTableData;
@@ -1201,23 +1078,50 @@
         const table = getTable();
         if (!table || observer) return;
 
-        observer = new MutationObserver(() => {
-            if (isProcessing) return;
+        observer = new MutationObserver((mutations) => {
+            if (isProcessing || suppressObserver) return;
+
+            let shouldReact = false;
+
+            for (const m of mutations) {
+                if (m.target && m.target.closest && m.target.closest('#rf-panel')) {
+                    continue;
+                }
+
+                const targetEl = m.target && m.target.nodeType === 1 ? m.target : null;
+
+                if (targetEl) {
+                    if (targetEl.classList.contains('rf-has-next')) continue;
+                    if (targetEl.closest && targetEl.closest('#rf-panel')) continue;
+                }
+
+                shouldReact = true;
+                break;
+            }
+
+            if (!shouldReact) return;
+
             clearTimeout(observerTimer);
             observerTimer = setTimeout(() => {
-                cacheAllCycleNames();
-                const sel = document.querySelector('#rf-panel input:checked');
-                const currentKey = sel ? sel.value : getSavedFilter();
-                setNextCycleNames(currentKey);
-                doFilter();
-                highlightRows();
-                calculateBlocks();
-            }, 50);
+                if (suppressObserver) return;
+
+                runInternalUpdate(() => {
+                    cacheAllCycleNames();
+                    const sel = document.querySelector('#rf-panel input:checked');
+                    const currentKey = sel ? sel.value : getSavedFilter();
+                    setNextCycleNames(currentKey);
+                    doFilter();
+                    highlightRows();
+                    calculateBlocks();
+                });
+            }, 80);
         });
 
         observer.observe(table, {
             childList: true,
-            subtree: true
+            subtree: true,
+            attributes: false,
+            characterData: false
         });
     }
 
@@ -1227,15 +1131,18 @@
 
     function init() {
         createPanel();
-        cacheAllCycleNames();
 
-        const savedKey = getSavedFilter();
-        setNextCycleNames(savedKey);
+        runInternalUpdate(() => {
+            cacheAllCycleNames();
 
-        doFilter();
-        highlightRows();
-        calculateBlocks();
-        setupObserver();
+            const savedKey = getSavedFilter();
+            setNextCycleNames(savedKey);
+
+            doFilter();
+            highlightRows();
+            calculateBlocks();
+            setupObserver();
+        });
     }
 
     function waitForTable() {
