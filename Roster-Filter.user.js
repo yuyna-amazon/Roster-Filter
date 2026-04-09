@@ -303,8 +303,8 @@
             right: 2px;
             top: calc(50% - 1px);
             transform: translateY(-50%);
-            font-size: 10px;
-            line-height: 10px;
+            font-size: 13px;
+            line-height: 13px;
             letter-spacing: 0;
             color: #c2185b;
             font-weight: bold;
