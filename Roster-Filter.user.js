@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      6.5
+// @version      6.6
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -79,8 +79,8 @@
         { key: 'ALL',     label: '全て表示', min: -1,   max: -1 },
         { key: 'SSD_1',   label: 'SSD_1',    min: 0,    max: 420 },
         { key: 'SSD_1_B', label: 'SSD_1_B',  min: 420,  max: 600 },
-        { key: 'SSD_2',   label: 'SSD_2',    min: 600,  max: 840 },
-        { key: 'SSD_3',   label: 'SSD_3',    min: 840,  max: 1020 },
+        { key: 'SSD_2',   label: 'SSD_2',    min: 600,  max: 780 },
+        { key: 'SSD_3',   label: 'SSD_3',    min: 780,  max: 1020 },
         { key: 'SSD_3_B', label: 'SSD_3_B',  min: 1020, max: 1200 },
         { key: 'SSD_4',   label: 'SSD_4',    min: 1200, max: Infinity }
     ];
