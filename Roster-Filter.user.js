@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      6.7
+// @version      7.0
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -92,7 +92,10 @@
 
     const EXCLUDED_TYPES  = ['AmFlex Kei Van (ProDP)'];
     const ACTIVE_COLOR    = '#ffffcc';
-    const DUPLICATE_COLOR = '#ffcccc';
+    const DUPLICATE_COLOR = '#ccf2ff';
+    const MARKED_COLOR    = '#ffcccc';
+    const MARKED_STORAGE_KEY = 'rf-marked-dpids';
+    const MARKED_NAMES_KEY  = 'rf-marked-dpid-names';
 
     /* ======================================================
        状態管理
@@ -106,6 +109,42 @@
     let observer       = null;
     let observerTimer  = null;
     let suppressObserver = false;
+    let markedDPIDs = [];
+    let markedDPNames = {};
+    let markFeatureEnabled = true;
+
+    function loadMarkedDPIDs() {
+        try {
+            const stored = localStorage.getItem(MARKED_STORAGE_KEY);
+            if (stored) {
+                markedDPIDs = JSON.parse(stored);
+            }
+        } catch (e) {
+            markedDPIDs = [];
+        }
+        try {
+            const storedNames = localStorage.getItem(MARKED_NAMES_KEY);
+            if (storedNames) {
+                markedDPNames = JSON.parse(storedNames);
+            }
+        } catch (e) {
+            markedDPNames = {};
+        }
+    }
+
+    function saveMarkedDPIDs() {
+        localStorage.setItem(MARKED_STORAGE_KEY, JSON.stringify(markedDPIDs));
+    }
+
+    function saveMarkedDPNames() {
+        localStorage.setItem(MARKED_NAMES_KEY, JSON.stringify(markedDPNames));
+    }
+
+    function isMarkedDPID(id) {
+        if (!markFeatureEnabled) return false;
+        const lower = id.toLowerCase();
+        return markedDPIDs.some(marked => marked.toLowerCase() === lower);
+    }
 
     /* ======================================================
        CSS
@@ -150,6 +189,16 @@
             align-items: flex-start;
         }
         #rf-content.hide { display: none; }
+        #rf-content.rf-collapsed #rf-count,
+        #rf-content.rf-collapsed #rf-dup-count,
+        #rf-content.rf-collapsed #rf-btn-group,
+        #rf-content.rf-collapsed #rf-legend,
+        #rf-content.rf-collapsed #rf-vdivider,
+        #rf-content.rf-collapsed #rf-right,
+        #rf-content.rf-collapsed #rf-mark-vdivider,
+        #rf-content.rf-collapsed #rf-mark-panel {
+            display: none !important;
+        }
 
         #rf-left {
             min-width: 130px;
@@ -194,9 +243,9 @@
         #rf-dup-count {
             margin-top: 4px;
             padding: 6px;
-            background: #ffeeee;
+            background: #e0f4ff;
             border-radius: 3px;
-            color: #c00;
+            color: #0066cc;
             font-size: 11px;
             line-height: 1.2;
             display: flex;
@@ -289,6 +338,103 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
+        #rf-mark-panel {
+            min-width: 160px;
+            flex-shrink: 0;
+            padding-left: 10px;
+        }
+        #rf-mark-vdivider {
+            width: 1px;
+            background: #ddd;
+            align-self: stretch;
+            flex-shrink: 0;
+        }
+        #rf-mark-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #c00;
+        }
+        #rf-mark-panel-header span { font-weight: bold; font-size: 11px; color: #c00; }
+        #rf-mark-input-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        #rf-mark-input {
+            flex: 1;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 11px;
+            min-width: 0;
+        }
+        #rf-mark-add-btn {
+            padding: 4px 8px;
+            background: #c00;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        #rf-mark-add-btn:hover { background: #a00; }
+        #rf-mark-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        #rf-mark-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 6px;
+            margin: 2px 0;
+            background: #e8e8e8;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+        }
+        #rf-mark-list li span {
+            font-size: 11px;
+            color: #c00;
+            font-weight: bold;
+        }
+        .rf-mark-del-btn {
+            background: none;
+            border: none;
+            color: #c00;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+            font-weight: bold;
+        }
+        .rf-mark-del-btn:hover { color: #900; }
+        #rf-mark-empty {
+            color: #999;
+            text-align: center;
+            padding: 8px;
+            font-style: italic;
+            font-size: 11px;
+        }
+        #rf-mark-clear-btn {
+            margin-top: 6px;
+            padding: 4px 8px;
+            background: #fff;
+            color: #c00;
+            border: 1px solid #c00;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+            width: 100%;
+        }
+        #rf-mark-clear-btn:hover { background: #fff0f0; }
+
         td.rf-has-next {
             position: relative;
             padding-right: 48px !important;
@@ -306,7 +452,7 @@
             font-size: 13px;
             line-height: 13px;
             letter-spacing: 0;
-            color: #c2185b;
+            color: #0066cc;
             font-weight: bold;
             white-space: nowrap;
             pointer-events: none;
@@ -406,6 +552,20 @@
         for (const candidate of candidates) {
             const bind = (candidate.getAttribute('data-bind') || '').toLowerCase();
             if (bind.includes('text:') && bind.includes('end')) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    function getTransporterIdCell(row) {
+        let td = row.querySelector('td[data-bind="text: transporterId"]');
+        if (td) return td;
+
+        const candidates = row.querySelectorAll('td[data-bind]');
+        for (const candidate of candidates) {
+            const bind = (candidate.getAttribute('data-bind') || '').toLowerCase();
+            if (bind.includes('text:') && bind.includes('transporterid')) {
                 return candidate;
             }
         }
@@ -673,19 +833,26 @@
                     const name = nameTd ? nameTd.textContent.trim() : '';
                     const normalizedName = normalizeName(name);
 
+                    const transporterIdTd = getTransporterIdCell(row);
+                    const transporterId = transporterIdTd ? transporterIdTd.textContent.trim() : '';
+
                     let newColor = '';
                     let isActive = false;
                     let isDuplicate = false;
+                    let isMarked = false;
 
                     const nextInfo = normalizedName ? nextDetailMap.get(normalizedName) : null;
 
                     isDuplicate = checkDuplicates && !!normalizedName && nextCycleNames.has(normalizedName);
                     isActive = (!endTime || endTime >= now) && (availability === '実行中');
+                    isMarked = !!transporterId && isMarkedDPID(transporterId);
 
                     if (isDuplicate) duplicateCount++;
 
                     if (isActive) {
                         newColor = ACTIVE_COLOR;
+                    } else if (isMarked) {
+                        newColor = MARKED_COLOR;
                     } else if (isDuplicate) {
                         newColor = DUPLICATE_COLOR;
                     }
@@ -694,11 +861,21 @@
 
                     if (nameTd) {
                         if (isActive && isDuplicate) {
-                            nameTd.style.color = '#c00';
+                            nameTd.style.color = '#0066cc';
                             nameTd.style.fontWeight = 'bold';
                         } else {
                             nameTd.style.color = '';
                             nameTd.style.fontWeight = '';
+                        }
+                    }
+
+                    if (transporterIdTd) {
+                        if (isMarked) {
+                            transporterIdTd.style.color = '#c00';
+                            transporterIdTd.style.fontWeight = 'bold';
+                        } else {
+                            transporterIdTd.style.color = '';
+                            transporterIdTd.style.fontWeight = '';
                         }
                     }
 
@@ -714,6 +891,7 @@
                 } else {
                     updateDuplicateCount(duplicateCount, currentKey);
                     isProcessing = false;
+                    if (markFeatureEnabled) renderMarkList();
                 }
             }
 
@@ -1002,17 +1180,20 @@
         const btnGroup = document.createElement('div');
         btnGroup.id = 'rf-btn-group';
 
-        const refreshBtn = document.createElement('button');
-        refreshBtn.id = 'rf-refresh';
-        refreshBtn.className = 'rf-btn';
-        refreshBtn.textContent = '更新';
+        const markToggleBtn = document.createElement('button');
+        markToggleBtn.id = 'rf-mark-toggle';
+        markToggleBtn.className = 'rf-btn';
+        markToggleBtn.style.background = '#c00';
+        markToggleBtn.style.color = '#fff';
+        markToggleBtn.style.borderColor = '#c00';
+        markToggleBtn.textContent = 'DP ID: ON';
 
         const copyBtn = document.createElement('button');
         copyBtn.id = 'rf-copy';
         copyBtn.className = 'rf-btn rf-btn-green';
         copyBtn.textContent = 'Copy';
 
-        btnGroup.appendChild(refreshBtn);
+        btnGroup.appendChild(markToggleBtn);
         btnGroup.appendChild(copyBtn);
         left.appendChild(btnGroup);
 
@@ -1051,23 +1232,214 @@
         });
 
         toggleBtn.onclick = function() {
-            const isHidden = content.classList.toggle('hide');
+            const isHidden = !content.classList.contains('rf-collapsed');
+            content.classList.toggle('rf-collapsed', isHidden);
             this.textContent = isHidden ? '+' : '-';
         };
 
-        refreshBtn.onclick = function() {
-            runInternalUpdate(() => {
-                cacheAllCycleNames();
-                const sel = document.querySelector('#rf-panel input:checked');
-                const currentKey = sel ? sel.value : 'ALL';
-                setNextCycleNames(currentKey);
-                doFilter();
-                highlightRows();
-                calculateBlocks();
-            });
+        markToggleBtn.onclick = function() {
+            markFeatureEnabled = !markFeatureEnabled;
+            this.textContent = markFeatureEnabled ? 'DP ID: ON' : 'DP ID: OFF';
+            this.style.background = markFeatureEnabled ? '#c00' : '#999';
+            this.style.borderColor = markFeatureEnabled ? '#c00' : '#999';
+
+            const markPanel = document.getElementById('rf-mark-panel');
+            const markDiv = document.getElementById('rf-mark-vdivider');
+            if (markPanel) markPanel.style.display = markFeatureEnabled ? '' : 'none';
+            if (markDiv) markDiv.style.display = markFeatureEnabled ? '' : 'none';
+
+            runInternalUpdate(() => { highlightRows(); });
         };
 
         copyBtn.onclick = copyTableData;
+    }
+
+    /* ======================================================
+       DP ID登録パネル
+    ====================================================== */
+
+    function createMarkPanel() {
+        const content = document.getElementById('rf-content');
+        if (!content) return;
+
+        const markDivider = document.createElement('div');
+        markDivider.id = 'rf-mark-vdivider';
+
+        const panel = document.createElement('div');
+        panel.id = 'rf-mark-panel';
+
+        panel.innerHTML =
+            '<div id="rf-mark-panel-header">' +
+                '<span>DP ID登録</span>' +
+            '</div>' +
+            '<div id="rf-mark-input-row">' +
+                '<input id="rf-mark-input" type="text" placeholder="DP IDを入力">' +
+                '<button id="rf-mark-add-btn">追加</button>' +
+            '</div>' +
+            '<ul id="rf-mark-list"></ul>' +
+            '<button id="rf-mark-clear-btn">全て削除</button>';
+
+        content.appendChild(markDivider);
+        content.appendChild(panel);
+
+        document.getElementById('rf-mark-add-btn').onclick = function() {
+            const input = document.getElementById('rf-mark-input');
+            const val = input.value.trim();
+            if (!val) return;
+
+            const ids = val.split(/[\n,\s]+/).filter(s => s.trim());
+            ids.forEach(id => {
+                const trimmed = id.trim();
+                if (trimmed && !markedDPIDs.some(existing => existing === trimmed)) {
+                    markedDPIDs.push(trimmed);
+                }
+            });
+            saveMarkedDPIDs();
+            input.value = '';
+            renderMarkList();
+            runInternalUpdate(() => { highlightRows(); });
+        };
+
+        document.getElementById('rf-mark-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('rf-mark-add-btn').click();
+            }
+        });
+
+        document.getElementById('rf-mark-clear-btn').onclick = function() {
+            if (markedDPIDs.length === 0) return;
+            markedDPIDs = [];
+            markedDPNames = {};
+            saveMarkedDPIDs();
+            saveMarkedDPNames();
+            renderMarkList();
+            runInternalUpdate(() => { highlightRows(); });
+        };
+    }
+
+    function findDPNameById(dpId) {
+        const rows = getRows();
+        const lowerDpId = dpId.toLowerCase();
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const tidTd = getTransporterIdCell(row);
+            if (tidTd && tidTd.textContent.trim().toLowerCase() === lowerDpId) {
+                const nameTd = getNameCell(row);
+                const name = nameTd ? nameTd.textContent.trim() : '';
+                if (name) {
+                    markedDPNames[lowerDpId] = name;
+                    saveMarkedDPNames();
+                }
+                return name;
+            }
+        }
+        // ページ上に見つからない場合はキャッシュから返す
+        return markedDPNames[lowerDpId] || '';
+    }
+
+    function refreshUnknownDPNames() {
+        let updated = false;
+        markedDPIDs.forEach(id => {
+            const lowerDpId = id.toLowerCase();
+            if (!markedDPNames[lowerDpId]) {
+                const name = findDPNameById(id);
+                if (name) {
+                    updated = true;
+                }
+            }
+        });
+        if (updated) {
+            renderMarkList();
+        }
+    }
+
+    function countDPIdHits(dpId) {
+        const rows = getRows();
+        const lowerDpId = dpId.toLowerCase();
+        let count = 0;
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const tidTd = getTransporterIdCell(row);
+            if (tidTd && tidTd.textContent.trim().toLowerCase() === lowerDpId) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    function renderMarkList() {
+        const list = document.getElementById('rf-mark-list');
+        if (!list) return;
+
+        if (markedDPIDs.length === 0) {
+            list.innerHTML = '<div id="rf-mark-empty">登録なし</div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        markedDPIDs.forEach((id, idx) => {
+            const li = document.createElement('li');
+
+            const infoDiv = document.createElement('div');
+            infoDiv.style.display = 'flex';
+            infoDiv.style.flexDirection = 'column';
+            infoDiv.style.gap = '2px';
+
+            const idSpan = document.createElement('span');
+            idSpan.textContent = id;
+            idSpan.style.fontSize = '12px';
+            idSpan.style.color = '#c00';
+            idSpan.style.fontWeight = 'bold';
+
+            const nameRow = document.createElement('div');
+            nameRow.style.display = 'flex';
+            nameRow.style.alignItems = 'center';
+            nameRow.style.gap = '6px';
+
+            const nameSpan = document.createElement('span');
+            const dpName = findDPNameById(id);
+            nameSpan.textContent = dpName || '（不明）';
+            nameSpan.style.fontSize = '11px';
+            nameSpan.style.color = '#555';
+
+            nameRow.appendChild(nameSpan);
+
+            const hits = countDPIdHits(id);
+            if (hits > 0) {
+                const hitSpan = document.createElement('span');
+                hitSpan.textContent = hits + '件';
+                hitSpan.style.fontSize = '10px';
+                hitSpan.style.color = '#fff';
+                hitSpan.style.background = '#c00';
+                hitSpan.style.borderRadius = '3px';
+                hitSpan.style.padding = '1px 4px';
+                nameRow.appendChild(hitSpan);
+            }
+
+            infoDiv.appendChild(idSpan);
+            infoDiv.appendChild(nameRow);
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'rf-mark-del-btn';
+            delBtn.textContent = '×';
+            delBtn.onclick = function() {
+                const removedId = markedDPIDs[idx].toLowerCase();
+                markedDPIDs.splice(idx, 1);
+                delete markedDPNames[removedId];
+                saveMarkedDPIDs();
+                saveMarkedDPNames();
+                renderMarkList();
+                runInternalUpdate(() => { highlightRows(); });
+            };
+
+            li.appendChild(infoDiv);
+            li.appendChild(delBtn);
+            list.appendChild(li);
+        });
+    }
+
+    function renderMarkListOnInit() {
+        renderMarkList();
     }
 
     /* ======================================================
@@ -1130,7 +1502,10 @@
     ====================================================== */
 
     function init() {
+        loadMarkedDPIDs();
         createPanel();
+        createMarkPanel();
+        renderMarkListOnInit();
 
         runInternalUpdate(() => {
             cacheAllCycleNames();
@@ -1142,6 +1517,8 @@
             highlightRows();
             calculateBlocks();
             setupObserver();
+
+            refreshUnknownDPNames();
         });
     }
 
