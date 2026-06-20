@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      7.1
+// @version      7.2
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -79,8 +79,8 @@
         { key: 'ALL',     label: '全て表示', min: -1,   max: -1 },
         { key: 'SSD_1',   label: 'SSD_1',    min: 0,    max: 390 },
         { key: 'SSD_1_B', label: 'SSD_1_B',  min: 390,  max: 570 },
-        { key: 'SSD_2',   label: 'SSD_2',    min: 570,  max: 780 },
-        { key: 'SSD_3',   label: 'SSD_3',    min: 780,  max: 990 },
+        { key: 'SSD_2',   label: 'SSD_2',    min: 570,  max: 810 },
+        { key: 'SSD_3',   label: 'SSD_3',    min: 810,  max: 990 },
         { key: 'SSD_3_B', label: 'SSD_3_B',  min: 990,  max: 1170 },
         { key: 'SSD_4',   label: 'SSD_4',    min: 1170, max: Infinity }
     ];
@@ -111,7 +111,7 @@
     let suppressObserver = false;
     let markedDPIDs = [];
     let markedDPNames = {};
-    let markFeatureEnabled = true;
+    let markFeatureEnabled = false;
 
     function loadMarkedDPIDs() {
         try {
@@ -1183,10 +1183,10 @@
         const markToggleBtn = document.createElement('button');
         markToggleBtn.id = 'rf-mark-toggle';
         markToggleBtn.className = 'rf-btn';
-        markToggleBtn.style.background = '#c00';
+        markToggleBtn.style.background = '#999';
         markToggleBtn.style.color = '#fff';
-        markToggleBtn.style.borderColor = '#c00';
-        markToggleBtn.textContent = 'DP ID: ON';
+        markToggleBtn.style.borderColor = '#999';
+        markToggleBtn.textContent = 'DP ID: OFF';
 
         const copyBtn = document.createElement('button');
         copyBtn.id = 'rf-copy';
@@ -1281,6 +1281,11 @@
 
         content.appendChild(markDivider);
         content.appendChild(panel);
+
+        if (!markFeatureEnabled) {
+            panel.style.display = 'none';
+            markDivider.style.display = 'none';
+        }
 
         document.getElementById('rf-mark-add-btn').onclick = function() {
             const input = document.getElementById('rf-mark-input');
