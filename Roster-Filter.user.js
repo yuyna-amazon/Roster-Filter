@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      7.4
+// @version      7.5
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -96,6 +96,7 @@
     const MARKED_COLOR    = '#ffcccc';
     const MARKED_STORAGE_KEY = 'rf-marked-dpids';
     const MARKED_NAMES_KEY  = 'rf-marked-dpid-names';
+    const MARK_ENABLED_KEY  = 'rf-mark-enabled';
 
     /* ======================================================
        状態管理
@@ -112,6 +113,15 @@
     let markedDPIDs = [];
     let markedDPNames = {};
     let markFeatureEnabled = false;
+
+    function loadMarkFeatureState() {
+        const stored = localStorage.getItem(MARK_ENABLED_KEY);
+        markFeatureEnabled = stored === 'true';
+    }
+
+    function saveMarkFeatureState() {
+        localStorage.setItem(MARK_ENABLED_KEY, markFeatureEnabled ? 'true' : 'false');
+    }
 
     function loadMarkedDPIDs() {
         try {
@@ -1183,10 +1193,10 @@
         const markToggleBtn = document.createElement('button');
         markToggleBtn.id = 'rf-mark-toggle';
         markToggleBtn.className = 'rf-btn';
-        markToggleBtn.style.background = '#999';
+        markToggleBtn.style.background = markFeatureEnabled ? '#c00' : '#999';
         markToggleBtn.style.color = '#fff';
-        markToggleBtn.style.borderColor = '#999';
-        markToggleBtn.textContent = 'DP ID: OFF';
+        markToggleBtn.style.borderColor = markFeatureEnabled ? '#c00' : '#999';
+        markToggleBtn.textContent = markFeatureEnabled ? 'DP ID: ON' : 'DP ID: OFF';
 
         const copyBtn = document.createElement('button');
         copyBtn.id = 'rf-copy';
@@ -1239,6 +1249,7 @@
 
         markToggleBtn.onclick = function() {
             markFeatureEnabled = !markFeatureEnabled;
+            saveMarkFeatureState();
             this.textContent = markFeatureEnabled ? 'DP ID: ON' : 'DP ID: OFF';
             this.style.background = markFeatureEnabled ? '#c00' : '#999';
             this.style.borderColor = markFeatureEnabled ? '#c00' : '#999';
@@ -1508,6 +1519,7 @@
 
     function init() {
         loadMarkedDPIDs();
+        loadMarkFeatureState();
         createPanel();
         createMarkPanel();
         renderMarkListOnInit();
