@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      7.5
+// @version      7.6
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -77,12 +77,12 @@
 
     const FILTERS = [
         { key: 'ALL',     label: '全て表示', min: -1,   max: -1 },
-        { key: 'SSD_1',   label: 'SSD_1',    min: 0,    max: 390 },
-        { key: 'SSD_1_B', label: 'SSD_1_B',  min: 390,  max: 570 },
-        { key: 'SSD_2',   label: 'SSD_2',    min: 570,  max: 780 },
-        { key: 'SSD_3',   label: 'SSD_3',    min: 780,  max: 990 },
-        { key: 'SSD_3_B', label: 'SSD_3_B',  min: 990,  max: 1170 },
-        { key: 'SSD_4',   label: 'SSD_4',    min: 1170, max: Infinity }
+        { key: 'SSD_1',   label: 'SSD_1',    min: 0,    max: 360 },
+        { key: 'SSD_1_B', label: 'SSD_1_B',  min: 360,  max: 540 },
+        { key: 'SSD_2',   label: 'SSD_2',    min: 540,  max: 720 },
+        { key: 'SSD_3',   label: 'SSD_3',    min: 720,  max: 960 },
+        { key: 'SSD_3_B', label: 'SSD_3_B',  min: 960,  max: 1140 },
+        { key: 'SSD_4',   label: 'SSD_4',    min: 1140, max: Infinity }
     ];
 
     const FILTER_INDEX = {};
