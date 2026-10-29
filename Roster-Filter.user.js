@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Roster view
 // @namespace    https://github.com/yuyna-amazon/Roster-Filter
-// @version      7.6
+// @version      8.0
 // @author       yuyna
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazon.com
 // @description  Simple roster filter + availability highlighter + copy table data + block counter + duplicate checker + next cycle info inside body cells
@@ -9,6 +9,7 @@
 // @updateURL    https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @downloadURL  https://raw.githubusercontent.com/yuyna-amazon/Roster-Filter/main/Roster-Filter.user.js
 // @grant        GM_setClipboard
+// @run-at       document-idle
 // ==/UserScript==
 
 (function() {
@@ -519,6 +520,22 @@
         return document.getElementById('cspDATable');
     }
 
+    function getDSPTable() {
+        return document.getElementById('dspDATable');
+    }
+
+    function getFilterRows() {
+        const rows = [];
+        const tables = [getTable(), getDSPTable()];
+
+        for (const table of tables) {
+            if (!table) continue;
+            table.querySelectorAll('tbody tr').forEach(row => rows.push(row));
+        }
+
+        return rows;
+    }
+
     function getRows() {
         const t = getTable();
         return t ? t.querySelectorAll('tbody tr') : [];
@@ -598,7 +615,7 @@
     function doFilter() {
         const selected = document.querySelector('#rf-panel input:checked');
         const key = selected ? selected.value : getSavedFilter();
-        const rows = getRows();
+        const rows = getFilterRows();
 
         let total = 0;
         let visible = 0;
@@ -956,27 +973,49 @@
     }
 
     function copyTableData() {
-        const table = getTable();
-        if (!table) {
+        const dpTable = getTable();
+        const dspTable = getDSPTable();
+
+        if (!dpTable && !dspTable) {
             alert('Table not found!');
             return;
         }
 
-        const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
-        const data = [headers.join('\t')];
-        let copiedCount = 0;
+        const data = [];
 
-        table.querySelectorAll('tbody tr').forEach(row => {
-            if (row.classList.contains('rf-hide')) return;
-            const cells = Array.from(row.querySelectorAll('td')).map(td => getCellTextForCopy(td));
-            if (cells.length > 0) {
-                data.push(cells.join('\t'));
-                copiedCount++;
-            }
-        });
+        function appendTableData(table) {
+            if (!table) return 0;
+
+            const rows = [];
+            table.querySelectorAll('tbody tr').forEach(row => {
+                if (row.classList.contains('rf-hide')) return;
+
+                const cells = Array.from(row.querySelectorAll('td')).map(td => getCellTextForCopy(td));
+                if (cells.length > 0) rows.push(cells.join('\t'));
+            });
+
+            if (rows.length === 0) return 0;
+
+            if (data.length > 0) data.push('');
+
+            const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
+            data.push(headers.join('\t'));
+            data.push(...rows);
+
+            return rows.length;
+        }
+
+        const dpCopiedCount = appendTableData(dpTable);
+        const dspCopiedCount = appendTableData(dspTable);
+        const copiedCount = dpCopiedCount + dspCopiedCount;
+
+        if (copiedCount === 0) {
+            showNotification('コピー対象の行がありません');
+            return;
+        }
 
         GM_setClipboard(data.join('\n'));
-        showNotification(copiedCount + '行をコピーしました');
+        showNotification('DP ' + dpCopiedCount + '行 / DSP ' + dspCopiedCount + '行をコピーしました');
     }
 
     /* ======================================================
@@ -988,55 +1027,78 @@
     }
 
     function calculateBlocks() {
-        const table = getTable();
-        if (!table) {
+        const dpTable = getTable();
+        const dspTable = getDSPTable();
+        const tables = [dpTable, dspTable].filter(Boolean);
+
+        if (tables.length === 0) {
             showBlockError('テーブルが見つかりません');
             return;
         }
 
-        const headers = table.querySelectorAll('th');
-        let timeColumnIndex = -1;
-        let durationColumnIndex = -1;
+        const timeFormatData = {};
+        let hasTimeColumn = false;
+        let hasDurationColumn = true;
 
-        for (let i = 0; i < headers.length; i++) {
-            const t = headers[i].textContent.trim();
-            if (t.includes('開始時刻')) timeColumnIndex = i;
-            if (t.includes('シフトの長さ')) durationColumnIndex = i;
+        function collectTableData(table) {
+            if (!table) return 0;
+
+            const headers = table.querySelectorAll('th');
+            let timeColumnIndex = -1;
+            let durationColumnIndex = -1;
+
+            for (let i = 0; i < headers.length; i++) {
+                const t = headers[i].textContent.trim();
+                if (t.includes('開始時刻')) timeColumnIndex = i;
+                if (t.includes('シフトの長さ')) durationColumnIndex = i;
+            }
+
+            if (timeColumnIndex === -1) return 0;
+
+            hasTimeColumn = true;
+            if (durationColumnIndex === -1) hasDurationColumn = false;
+
+            let total = 0;
+
+            table.querySelectorAll('tbody tr').forEach(row => {
+                if (row.classList.contains('rf-hide')) return;
+
+                const cells = row.querySelectorAll('td');
+                const cellText = cells[timeColumnIndex] ? cells[timeColumnIndex].textContent.trim() : '';
+
+                if (!cellText || !cellText.includes(':')) return;
+
+                const duration = (durationColumnIndex !== -1 && cells[durationColumnIndex])
+                    ? cells[durationColumnIndex].textContent.trim()
+                    : '';
+
+                total++;
+
+                if (timeFormatData[cellText]) {
+                    timeFormatData[cellText].count++;
+                    if (duration && !timeFormatData[cellText].durations.includes(duration)) {
+                        timeFormatData[cellText].durations.push(duration);
+                    }
+                } else {
+                    timeFormatData[cellText] = {
+                        count: 1,
+                        durations: duration ? [duration] : []
+                    };
+                }
+            });
+
+            return total;
         }
 
-        if (timeColumnIndex === -1) {
+        const dpTotal = collectTableData(dpTable);
+        const dspTotal = collectTableData(dspTable);
+
+        if (!hasTimeColumn) {
             showBlockError('「開始時刻」列が見つかりません');
             return;
         }
 
-        const timeFormatData = {};
-
-        table.querySelectorAll('tbody tr').forEach(row => {
-            if (row.classList.contains('rf-hide')) return;
-
-            const cells = row.querySelectorAll('td');
-            const cellText = cells[timeColumnIndex] ? cells[timeColumnIndex].textContent.trim() : '';
-
-            if (!cellText || !cellText.includes(':')) return;
-
-            const duration = (durationColumnIndex !== -1 && cells[durationColumnIndex])
-                ? cells[durationColumnIndex].textContent.trim()
-                : '';
-
-            if (timeFormatData[cellText]) {
-                timeFormatData[cellText].count++;
-                if (duration && !timeFormatData[cellText].durations.includes(duration)) {
-                    timeFormatData[cellText].durations.push(duration);
-                }
-            } else {
-                timeFormatData[cellText] = {
-                    count: 1,
-                    durations: duration ? [duration] : []
-                };
-            }
-        });
-
-        showBlockResult(timeFormatData, durationColumnIndex !== -1);
+        showBlockResult(timeFormatData, hasDurationColumn, dpTotal, dspTotal, Boolean(dspTable));
     }
 
     function showBlockError(message) {
@@ -1059,7 +1121,7 @@
         section.appendChild(msg);
     }
 
-    function showBlockResult(timeFormatData, hasDurationColumn) {
+    function showBlockResult(timeFormatData, hasDurationColumn, dpTotal, dspTotal, showDSPTotal) {
         const section = getBlockSection();
         if (!section) return;
 
@@ -1068,8 +1130,6 @@
 
         const timeFormats = Object.entries(timeFormatData);
         timeFormats.sort((a, b) => (parseTimeToMinutes(a[0]) || 0) - (parseTimeToMinutes(b[0]) || 0));
-
-        const totalTimeCount = Object.values(timeFormatData).reduce((s, d) => s + d.count, 0);
 
         const header = document.createElement('div');
         header.className = 'rf-block-header';
@@ -1082,11 +1142,27 @@
 
         const totalValue = document.createElement('strong');
         totalValue.style.color = '#f57c00';
-        totalValue.textContent = totalTimeCount + '名';
+        totalValue.textContent = dpTotal + '名';
 
         totalRow.appendChild(totalLabel);
         totalRow.appendChild(totalValue);
         header.appendChild(totalRow);
+
+        if (showDSPTotal) {
+            const dspTotalRow = document.createElement('div');
+            dspTotalRow.className = 'rf-block-row';
+
+            const dspTotalLabel = document.createElement('span');
+            dspTotalLabel.textContent = 'DSP合計:';
+
+            const dspTotalValue = document.createElement('strong');
+            dspTotalValue.style.color = '#f57c00';
+            dspTotalValue.textContent = dspTotal + '名';
+
+            dspTotalRow.appendChild(dspTotalLabel);
+            dspTotalRow.appendChild(dspTotalValue);
+            header.appendChild(dspTotalRow);
+        }
 
         if (!hasDurationColumn) {
             const warn = document.createElement('div');
@@ -1463,8 +1539,8 @@
     ====================================================== */
 
     function setupObserver() {
-        const table = getTable();
-        if (!table || observer) return;
+        const rosterContainer = document.getElementById('DATable') || getTable() || getDSPTable();
+        if (!rosterContainer || observer) return;
 
         observer = new MutationObserver((mutations) => {
             if (isProcessing || suppressObserver) return;
@@ -1505,7 +1581,7 @@
             }, 80);
         });
 
-        observer.observe(table, {
+        observer.observe(rosterContainer, {
             childList: true,
             subtree: true,
             attributes: false,
@@ -1540,13 +1616,25 @@
     }
 
     function waitForTable() {
-        const table = getTable();
-        if (table && table.querySelector('tbody tr')) {
-            init();
-        } else {
-            setTimeout(waitForTable, 1000);
+        try {
+            const dpTable = getTable();
+            const dspTable = getDSPTable();
+            const hasDPRows = dpTable && dpTable.querySelector('tbody tr td');
+            const hasDSPRows = dspTable && dspTable.querySelector('tbody tr td');
+
+            if (hasDPRows || hasDSPRows) {
+                init();
+            } else {
+                setTimeout(waitForTable, 1000);
+            }
+        } catch (error) {
+            console.error('[Roster view] 初期化に失敗しました:', error);
         }
     }
 
-    setTimeout(waitForTable, 2000);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(waitForTable, 500), { once: true });
+    } else {
+        setTimeout(waitForTable, 500);
+    }
 })();
